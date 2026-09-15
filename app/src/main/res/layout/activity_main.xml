@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- ================================================================ -->
+    <!-- PHOTO CANVAS                                                     -->
+    <!-- ================================================================ -->
+
+    <com.allay.photoeditor.editor.PhotoEditorView
+        android:id="@+id/photoEditorView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#000000"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/editorToolbar" />
+
+    <!-- ================================================================ -->
+    <!-- BOTTOM EDITOR TOOLBAR                                            -->
+    <!-- ================================================================ -->
+
+    <LinearLayout
+        android:id="@+id/editorToolbar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#151515"
+        android:elevation="12dp"
+        android:paddingStart="8dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="8dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <!-- ============================================================ -->
+        <!-- CONTEXTUAL TEXT TOOLS                                        -->
+        <!-- Only visible when a TextElement is selected.                -->
+        <!-- ============================================================ -->
+
+        <HorizontalScrollView
+            android:id="@+id/textToolsScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:fillViewport="false">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnTextEdit"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:text="Edit"
+                    android:textAllCaps="false"
+                    android:visibility="gone" />
+                <Button
+                    android:id="@+id/btnTextSize"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Size"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnTextColor"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Color"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnTextBold"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Bold"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnTextItalic"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Italic"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnTextAlignment"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Align"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnTextBackground"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Background"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnTextBackgroundColor"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="BG Color"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnTextFont"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginEnd="4dp"
+                    android:text="Font: Default"
+                    android:textAllCaps="false"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnTextMultiColor"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:text="Multi Color"
+                    android:textAllCaps="false"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- ============================================================ -->
+        <!-- MAIN ACTIONS                                                  -->
+        <!-- ============================================================ -->
+
+        <HorizontalScrollView
+            android:id="@+id/mainToolsScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:scrollbars="none"
+            android:fillViewport="false">
+
+            <LinearLayout
+                android:id="@+id/mainToolsContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnDelete"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Delete"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnAddText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Add Text"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnSelectImage"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Select Image"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+            </LinearLayout>
+        </HorizontalScrollView>
+
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
