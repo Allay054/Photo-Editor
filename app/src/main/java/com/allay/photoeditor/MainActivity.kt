@@ -62,6 +62,27 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnCrop:
             Button
 
+    private lateinit var btnTransform:
+            Button
+
+    private lateinit var btnFlipHorizontal:
+            Button
+
+    private lateinit var btnFlipVertical:
+            Button
+
+    private lateinit var btnRotateLeft:
+            Button
+
+    private lateinit var btnRotateRight:
+            Button
+
+    private lateinit var mainToolsScroll: View
+
+    private lateinit var rotationToolsScroll: View
+    private lateinit var btnRotationCancel: Button
+    private lateinit var btnRotationApply: Button
+
     private lateinit var btnCropRotate: Button
 
     private lateinit var cropToolsScroll: View
@@ -160,6 +181,36 @@ class MainActivity : AppCompatActivity() {
             findViewById(
                 R.id.btnCrop
             )
+
+        btnTransform =
+            findViewById(
+                R.id.btnTransform
+            )
+
+        btnFlipHorizontal =
+            findViewById(
+                R.id.btnFlipHorizontal
+            )
+
+        btnFlipVertical =
+            findViewById(
+                R.id.btnFlipVertical
+            )
+
+        btnRotateLeft =
+            findViewById(
+                R.id.btnRotateLeft
+            )
+
+        btnRotateRight =
+            findViewById(
+                R.id.btnRotateRight
+            )
+
+        mainToolsScroll = findViewById(R.id.mainToolsScroll)
+        rotationToolsScroll = findViewById(R.id.rotationToolsScroll)
+        btnRotationCancel = findViewById(R.id.btnRotationCancel)
+        btnRotationApply = findViewById(R.id.btnRotationApply)
 
         cropToolsScroll = findViewById(R.id.cropToolsScroll)
         btnCropFree = findViewById(R.id.btnCropFree)
@@ -296,6 +347,11 @@ class MainActivity : AppCompatActivity() {
 
         btnSelectImage.setOnClickListener {
 
+            if (photoEditorView.isRotationMode()) {
+                Toast.makeText(this, "Apply or cancel Rotation first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
             openGallery()
         }
 
@@ -309,6 +365,11 @@ class MainActivity : AppCompatActivity() {
                 TAG,
                 "Crop button clicked"
             )
+
+            if (photoEditorView.isRotationMode()) {
+                Toast.makeText(this, "Apply or cancel Rotation first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
 
             if (photoEditorView.isCropMode()) {
                 Log.d(
@@ -333,6 +394,180 @@ class MainActivity : AppCompatActivity() {
             }
 
             photoEditorView.enterCropMode()
+        }
+
+        // ---------------------------------------------------------------------
+        // TRANSFORM MODE - PHASE 6.9
+        // ---------------------------------------------------------------------
+
+        btnTransform.setOnClickListener {
+            Log.d(TAG, "Transform button clicked")
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode()) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel Crop Mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            photoEditorView.enterTransformMode()
+        }
+
+        // ---------------------------------------------------------------------
+        // IMAGE TRANSFORM - PHASE 6.1 / 6.2
+        // ---------------------------------------------------------------------
+
+        btnFlipHorizontal.setOnClickListener {
+
+            Log.d(
+                TAG,
+                "Horizontal flip button clicked"
+            )
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode()) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel Crop Mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                return@setOnClickListener
+            }
+
+            photoEditorView.flipHorizontal()
+        }
+
+        // ---------------------------------------------------------------------
+        // IMAGE TRANSFORM - PHASE 6.2
+        // ---------------------------------------------------------------------
+
+        btnFlipVertical.setOnClickListener {
+
+            Log.d(
+                TAG,
+                "Vertical flip button clicked"
+            )
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode()) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel Crop Mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                return@setOnClickListener
+            }
+
+            photoEditorView.flipVertical()
+        }
+
+        // ---------------------------------------------------------------------
+        // IMAGE TRANSFORM - PHASE 6.3
+        // ---------------------------------------------------------------------
+
+        btnRotateLeft.setOnClickListener {
+
+            Log.d(
+                TAG,
+                "Rotate left 90 degrees button clicked"
+            )
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode()) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel Crop Mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                return@setOnClickListener
+            }
+
+            photoEditorView.rotateLeft90()
+        }
+
+        btnRotateRight.setOnClickListener {
+
+            Log.d(
+                TAG,
+                "Rotate right 90 degrees button clicked"
+            )
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode()) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel Crop Mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                return@setOnClickListener
+            }
+
+            photoEditorView.rotateRight90()
+        }
+
+        // ---------------------------------------------------------------------
+        // ROTATION SESSION - PHASE 6.5 / 6.6
+        // ---------------------------------------------------------------------
+
+        btnRotationCancel.setOnClickListener {
+            Log.d(TAG, "Cancel rotation clicked")
+            photoEditorView.cancelRotation()
+        }
+
+        btnRotationApply.setOnClickListener {
+            Log.d(TAG, "Apply rotation clicked")
+            photoEditorView.applyRotation()
         }
 
         // ---------------------------------------------------------------------
@@ -391,6 +626,11 @@ class MainActivity : AppCompatActivity() {
 
         btnAddText.setOnClickListener {
 
+            if (photoEditorView.isRotationMode()) {
+                Toast.makeText(this, "Apply or cancel Rotation first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
             showAddTextDialog()
         }
 
@@ -404,6 +644,11 @@ class MainActivity : AppCompatActivity() {
                 TAG,
                 "Delete button clicked"
             )
+
+            if (photoEditorView.isRotationMode()) {
+                Toast.makeText(this, "Apply or cancel Rotation first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
 
             photoEditorView
                 .deleteSelectedElement()
@@ -677,6 +922,40 @@ class MainActivity : AppCompatActivity() {
             )
 
             showEditTextDialog(textElement)
+        }
+
+        // ---------------------------------------------------------------------
+        // ROTATION MODE CHANGED
+        // ---------------------------------------------------------------------
+
+        photoEditorView.onRotationModeChanged = { isRotationMode ->
+            Log.d(TAG, "Rotation mode changed: $isRotationMode")
+            updateRotationTools(isRotationMode)
+
+            mainToolsScroll.visibility = if (isRotationMode) View.GONE else View.VISIBLE
+
+            btnSelectImage.isEnabled = !isRotationMode
+            btnAddText.isEnabled = !isRotationMode
+            btnCrop.isEnabled = !isRotationMode
+            btnFlipHorizontal.isEnabled = !isRotationMode
+            btnFlipVertical.isEnabled = !isRotationMode
+            btnDelete.isEnabled = !isRotationMode && photoEditorView.getSelectedElement() != null
+            btnRotateLeft.isEnabled = true
+            btnRotateRight.isEnabled = true
+
+            if (!isRotationMode) {
+                updateDeleteButton()
+                updateTextEditButton(photoEditorView.getSelectedElement())
+                updateTextColorButton(photoEditorView.getSelectedElement())
+                updateTextSizeButton(photoEditorView.getSelectedElement())
+                updateTextBoldButton(photoEditorView.getSelectedElement())
+                updateTextItalicButton(photoEditorView.getSelectedElement())
+                updateTextAlignmentButton(photoEditorView.getSelectedElement())
+                updateTextBackgroundButton(photoEditorView.getSelectedElement())
+                updateTextBackgroundColorButton(photoEditorView.getSelectedElement())
+                updateTextFontButton(photoEditorView.getSelectedElement())
+                updateTextMultiColorButton(photoEditorView.getSelectedElement())
+            }
         }
 
         // ---------------------------------------------------------------------
@@ -1789,6 +2068,20 @@ class MainActivity : AppCompatActivity() {
             btnTextEdit.text = "Edit"
         } else {
             btnTextEdit.visibility = View.GONE
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // TRANSFORM TOOLS UI
+    // -------------------------------------------------------------------------
+
+    private fun updateRotationTools(isRotationMode: Boolean) {
+        rotationToolsScroll.visibility =
+            if (isRotationMode) View.VISIBLE else View.GONE
+
+        if (isRotationMode) {
+            textToolsScroll.visibility = View.GONE
+            cropToolsScroll.visibility = View.GONE
         }
     }
 

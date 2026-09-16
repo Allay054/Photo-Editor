@@ -258,80 +258,187 @@ The crop system provides an interactive crop mode with free and fixed aspect-rat
 
 # Phase 6 — Image Transform
 
-The next major development phase focuses on image transformations while maintaining correct positioning of editor elements such as text.
+The transform system provides non-destructive transform sessions for flipping and rotating the image while maintaining correct positioning and alignment of editor elements such as text.
 
 ## 6.1 — Flip Horizontal
 
-* [ ] Flip image horizontally
-* [ ] Preserve image dimensions
-* [ ] Mirror editor elements correctly
-* [ ] Maintain text positioning
-* [ ] Preserve editor state
+* [x] Flip image horizontally
+* [x] Preserve image dimensions
+* [x] Mirror editor elements correctly
+* [x] Maintain text positioning
+* [x] Preserve editor state
 
 ## 6.2 — Flip Vertical
 
-* [ ] Flip image vertically
-* [ ] Preserve image dimensions
-* [ ] Mirror editor elements correctly
-* [ ] Maintain text positioning
-* [ ] Preserve editor state
+* [x] Flip image vertically
+* [x] Preserve image dimensions
+* [x] Mirror editor elements correctly
+* [x] Maintain text positioning
+* [x] Preserve editor state
 
 ## 6.3 — Rotate Left 90°
 
-* [ ] Rotate image counter-clockwise
-* [ ] Update image dimensions
-* [ ] Transform editor elements
-* [ ] Preserve element positioning
+* [x] Rotate image counter-clockwise
+* [x] Update image dimensions
+* [x] Transform editor elements
+* [x] Preserve element positioning
 
 ## 6.4 — Rotate Right 90°
 
-* [ ] Rotate image clockwise
-* [ ] Update image dimensions
-* [ ] Transform editor elements
-* [ ] Preserve element positioning
+* [x] Rotate image clockwise
+* [x] Update image dimensions
+* [x] Transform editor elements
+* [x] Preserve element positioning
 
-## 6.5 — Transform State Safety
+## 6.5 — Apply Rotation
 
-* [ ] Maintain editor state after transformation
-* [ ] Handle repeated transformations
-* [ ] Handle transformation combinations
-* [ ] Protect against invalid bitmap states
-* [ ] Ensure crop state remains safe
+* [x] Enter rotation preview mode
+* [x] Preview repeated rotations
+* [x] Apply final rotation
+* [x] Commit transformed bitmap
+* [x] Preserve editor elements
+* [x] Exit rotation mode safely
 
-## 6.6 — Transform + Text Alignment
+## 6.6 — Cancel Rotation
 
-* [ ] Preserve text alignment after flip
-* [ ] Preserve text rotation
-* [ ] Preserve text position
-* [ ] Preserve text scale
-* [ ] Handle multiple text elements
+* [x] Cancel rotation preview
+* [x] Restore original bitmap
+* [x] Restore text elements
+* [x] Restore text positions
+* [x] Restore text rotation
+* [x] Restore selection state
+* [x] Restore editor viewport state
 
-## 6.7 — Transform UX Polish
+## 6.7 — Transform State Safety
 
-* [ ] Transform toolbar
-* [ ] Button states
-* [ ] Interaction feedback
-* [ ] Prevent conflicting operations
-* [ ] Final transformation UX validation
+* [x] Maintain editor state after transformation
+* [x] Handle repeated transformations
+* [x] Handle transformation combinations
+* [x] Protect against invalid bitmap states
+* [x] Protect Crop Mode from conflicting transforms
+* [x] Clean transient gesture state
+* [x] Protect Rotation Mode from conflicting operations
+* [x] Maintain safe mode transitions
+* [x] Validate selected editor elements
+* [x] Keep transformation matrices synchronized
+
+## 6.8 — Transform + Text Alignment
+
+* [x] Preserve text alignment after horizontal flip
+* [x] Preserve text alignment after vertical flip
+* [x] Preserve text rotation
+* [x] Preserve text position
+* [x] Preserve text scale
+* [x] Transform text coordinates after rotation
+* [x] Handle multiple text elements
+* [x] Preserve text styling
+* [x] Maintain text selection state
+
+## 6.9 — Transform UX Polish
+
+* [x] Dedicated Transform Mode
+* [x] Transform toolbar
+* [x] Flip Horizontal control
+* [x] Flip Vertical control
+* [x] Rotate Left control
+* [x] Rotate Right control
+* [x] Apply Transform
+* [x] Cancel Transform
+* [x] Contextual toolbar behavior
+* [x] Prevent conflicting operations
+* [x] Improve transform interaction feedback
+* [x] Maintain clean main editor toolbar
+* [x] Final transformation UX validation
 
 ### Phase 6 Status
 
-**⏳ IN PROGRESS**
-
-**Next Task: Phase 6.1 — Flip Horizontal**
+**✅ COMPLETED**
 
 ---
 
-# Phase 7 — Filters
+# Phase 7 — Image Adjustments
 
-* [ ] Brightness
-* [ ] Contrast
-* [ ] Saturation
-* [ ] Grayscale
-* [ ] Sepia
-* [ ] Additional filters
-* [ ] Filter preview
-* [ ] Filter reset
+The next major development phase focuses on non-destructive image adjustments with real-time preview and Apply / Cancel behavior.
+
+## 7.1 — Adjustment Mode Foundation
+
+* [ ] Adjustment button
+* [ ] Enter Adjustment Mode
+* [ ] Dedicated adjustment toolbar
+* [ ] Adjustment session state
+* [ ] Adjustment snapshot
+* [ ] Preview state
+* [ ] Apply adjustments
+* [ ] Cancel adjustments
+* [ ] Reset adjustments
+* [ ] Prevent conflicting editor operations
+* [ ] Preserve existing editor state
+
+## 7.2 — Brightness
+
+* [ ] Brightness slider
+* [ ] Real-time preview
+* [ ] Brightness reset
+
+## 7.3 — Contrast
+
+* [ ] Contrast slider
+* [ ] Real-time preview
+* [ ] Contrast reset
+
+## 7.4 — Saturation
+
+* [ ] Saturation slider
+* [ ] Real-time preview
+* [ ] Saturation reset
+
+## 7.5 — Exposure
+
+* [ ] Exposure adjustment
+* [ ] Real-time preview
+* [ ] Exposure reset
+
+## 7.6 — Temperature
+
+* [ ] Warm adjustment
+* [ ] Cool adjustment
+* [ ] Temperature reset
+
+## 7.7 — Highlights & Shadows
+
+* [ ] Highlights adjustment
+* [ ] Shadows adjustment
+* [ ] Real-time preview
+* [ ] Reset controls
+
+## 7.8 — Combined Adjustment Engine
+
+* [ ] Combine multiple adjustments
+* [ ] Preserve original source bitmap
+* [ ] Apply adjustments from a stable source
+* [ ] Avoid cumulative quality degradation
+* [ ] Optimize preview rendering
+
+## 7.9 — Adjustment State Safety
+
+* [ ] Apply safety
+* [ ] Cancel safety
+* [ ] Reset safety
+* [ ] Re-enter adjustment mode safely
+* [ ] No-image safety
+* [ ] Gesture-state cleanup
+* [ ] Protect Crop Mode
+* [ ] Protect Transform Mode
+
+## 7.10 — Adjustment UX Polish
+
+* [ ] Adjustment slider UI
+* [ ] Current value indicator
+* [ ] Reset button
+* [ ] Adjustment toolbar organization
+* [ ] Smooth preview
+* [ ] Interaction feedback
+* [ ] Final adjustment UX validation
 
 ---
 
@@ -383,6 +490,8 @@ The next major development phase focuses on image transformations while maintain
 * [ ] Transformation history
 * [ ] Crop history
 * [ ] Text editing history
+* [ ] Adjustment history
+* [ ] Annotation history
 
 ---
 
@@ -414,7 +523,7 @@ The next major development phase focuses on image transformations while maintain
 * [ ] Improve bottom tool panel
 * [ ] Improve text tools
 * [ ] Improve crop controls
-* [ ] Improve transform controls
+* [x] Improve transform controls
 * [ ] Improve gesture interactions
 * [ ] Animations
 * [ ] Accessibility
@@ -445,7 +554,8 @@ The next major development phase focuses on image transformations while maintain
 * [ ] Different Android versions
 * [ ] Gesture testing
 * [ ] Crop testing
-* [ ] Transform testing
+* [x] Transform testing
+* [ ] Adjustment testing
 * [ ] Performance testing
 * [ ] Memory leak testing
 * [ ] Final production testing
@@ -461,8 +571,8 @@ The next major development phase focuses on image transformations while maintain
 | Phase 3 — Photo Editor Canvas     | ✅ Completed    |
 | Phase 4 — Text Tool               | ✅ Completed    |
 | Phase 5 — Crop                    | ✅ Completed    |
-| Phase 6 — Image Transform         | 🔄 In Progress |
-| Phase 7 — Filters                 | ⏳ Planned      |
+| Phase 6 — Image Transform         | ✅ Completed    |
+| Phase 7 — Image Adjustments       | 🔄 In Progress |
 | Phase 8 — Shapes                  | ⏳ Planned      |
 | Phase 9 — Annotation              | ⏳ Planned      |
 | Phase 10 — Layers                 | ⏳ Planned      |
@@ -479,7 +589,7 @@ The next major development phase focuses on image transformations while maintain
 
 The current editor supports:
 
-### Image
+## Image
 
 * Gallery image selection
 * Image loading
@@ -489,7 +599,7 @@ The current editor supports:
 * Custom editor canvas
 * Matrix-based image rendering
 
-### Editor Elements
+## Editor Elements
 
 * Element selection
 * Element movement
@@ -497,7 +607,7 @@ The current editor supports:
 * Element rotation
 * Element deletion
 
-### Text
+## Text
 
 * Text creation
 * Text editing
@@ -515,7 +625,7 @@ The current editor supports:
 * Text background color
 * Text alignment
 
-### Text Interaction
+## Text Interaction
 
 * Text selection
 * Selection rectangle
@@ -525,7 +635,7 @@ The current editor supports:
 * Double-tap text editing
 * Toolbar-based text editing
 
-### Crop
+## Crop
 
 * Crop mode
 * Crop overlay
@@ -545,6 +655,25 @@ The current editor supports:
 * Crop boundary protection
 * Minimum crop size protection
 * Fixed aspect-ratio boundary safety
+
+## Transform
+
+* Transform Mode
+* Transform toolbar
+* Horizontal flip
+* Vertical flip
+* Rotate left 90°
+* Rotate right 90°
+* Apply transformation
+* Cancel transformation
+* Transformation preview
+* Transformation state safety
+* Combined transformations
+* Text position transformation
+* Text alignment preservation
+* Text rotation preservation
+* Text scale preservation
+* Transform interaction safety
 
 ---
 
@@ -595,7 +724,11 @@ Fix edge cases
    ↓
 Verify existing functionality
    ↓
+Update README
+   ↓
 Commit
+   ↓
+Push to GitHub
    ↓
 Move to next task
 ```
@@ -620,20 +753,36 @@ Testing includes:
 * Different aspect ratios
 * Interaction with existing editor elements
 * Regression testing of previously completed features
+* Mode transition testing
+* Apply / Cancel state testing
+* Transformation combination testing
 
 ---
 
 # 📌 Current Development Checkpoint
 
-**Phase 5 — Crop: ✅ COMPLETED**
+**Phase 6 — Image Transform: ✅ COMPLETED**
 
-The crop system is currently complete through **Phase 5.16 — Crop Boundary & Minimum Size Safety**.
+The transform system is complete through **Phase 6.9 — Transform UX Polish**.
+
+Completed transform capabilities include:
+
+* Horizontal flip
+* Vertical flip
+* 90° left rotation
+* 90° right rotation
+* Apply / Cancel transformation sessions
+* Transform state safety
+* Text alignment and positioning preservation
+* Dedicated Transform Mode
+* Transform toolbar
+* Interaction safety
 
 The next development task is:
 
-> **Phase 6.1 — Flip Horizontal**
+> **Phase 7.1 — Adjustment Mode Foundation**
 
-After implementation and testing, the working version will be committed to GitHub before continuing with the next task.
+The adjustment system will be developed incrementally with a dedicated mode, preview state, Apply / Cancel behavior, and state safety before adding individual adjustment controls.
 
 ---
 
@@ -651,7 +800,13 @@ Phase 4 - Text Tool
 Phase 5 - Crop
 Phase 6.1 - Flip Horizontal
 Phase 6.2 - Flip Vertical
-...
+Phase 6.3 - Rotate Left 90°
+Phase 6.4 - Rotate Right 90°
+Phase 6.5 - Apply Rotation
+Phase 6.6 - Cancel Rotation
+Phase 6.7 - Transform State Safety
+Phase 6.8 - Transform + Text Alignment
+Phase 6.9 - Transform UX Polish
 ```
 
 This makes it easier to track development progress and safely return to a previous stable implementation.
@@ -660,12 +815,33 @@ This makes it easier to track development progress and safely return to a previo
 
 # 📈 Project Status
 
-**Current Phase:** Phase 6 — Image Transform
+**Current Phase:** Phase 7 — Image Adjustments
 
-**Current Task:** Phase 6.1 — Flip Horizontal
+**Current Task:** Phase 7.1 — Adjustment Mode Foundation
 
-**Completed Phases:** 1–5
+**Completed Phases:** 1–6
 
 **Crop Status:** ✅ Production-ready foundation completed
 
-**Next Milestone:** Horizontal image flip with correct editor-element alignment
+**Transform Status:** ✅ Completed through Phase 6.9
+
+**Next Milestone:** Adjustment Mode Foundation with preview, Apply, Cancel, and Reset support
+
+---
+
+## 🎯 Development Philosophy
+
+The project prioritizes:
+
+* Small incremental changes
+* Production-quality implementation
+* Stable existing functionality
+* Reusable components
+* Clean architecture
+* Safe state management
+* Correct image-space transformations
+* Robust gesture handling
+* Thorough manual testing
+* Git checkpoints after completed milestones
+
+Each phase should be completed and verified before the next major capability is introduced.

@@ -155,6 +155,16 @@ class PhotoEditorView @JvmOverloads constructor(
 
     private var transformMode = TransformMode.NONE
 
+    /** Clears only transient touch/element-transform state. */
+    private fun resetGestureState() {
+        lastTouchX = 0f
+        lastTouchY = 0f
+        isDragging = false
+        isMovingElement = false
+        transformMode = TransformMode.NONE
+        activeCropHandle = CropHandle.NONE
+    }
+
     // =========================================================================
     // CROP MODE
     // =========================================================================
@@ -208,6 +218,19 @@ class PhotoEditorView @JvmOverloads constructor(
     private var cropOriginalElements: List<EditorElement>? = null
     private var cropOriginalSelectedElement: EditorElement? = null
 
+    // ---------------------------------------------------------------------
+    // ROTATION SESSION SNAPSHOT
+    // ---------------------------------------------------------------------
+
+    /** State captured when rotation mode starts for Cancel Rotation. */
+    private var rotationOriginalBitmap: Bitmap? = null
+    private var rotationOriginalElements: List<EditorElement>? = null
+    private var rotationOriginalSelectedElement: EditorElement? = null
+    private var rotationOriginalScaleFactor = MIN_SCALE
+    private var rotationOriginalTranslationX = 0f
+    private var rotationOriginalTranslationY = 0f
+    private var isRotationMode = false
+
     /** Last touch position in original image coordinates while moving the crop. */
     private val lastCropTouchImage = PointF()
 
@@ -250,6 +273,10 @@ class PhotoEditorView @JvmOverloads constructor(
 
     /** Called whenever crop mode changes. */
     var onCropModeChanged:
+            ((Boolean) -> Unit)? = null
+
+    /** Called when temporary rotation mode starts or ends. */
+    var onRotationModeChanged:
             ((Boolean) -> Unit)? = null
 
     // =========================================================================
@@ -430,6 +457,8 @@ class PhotoEditorView @JvmOverloads constructor(
         isCropMode = false
         cropRectImage = null
         clearCropSessionSnapshot()
+        clearRotationSessionSnapshot()
+        isRotationMode = false
 
         notifySelectionChanged()
         onCropModeChanged?.invoke(false)
@@ -456,6 +485,8 @@ class PhotoEditorView @JvmOverloads constructor(
         isCropMode = false
         activeCropHandle = CropHandle.NONE
         clearCropSessionSnapshot()
+        clearRotationSessionSnapshot()
+        isRotationMode = false
 
         notifySelectionChanged()
         onCropModeChanged?.invoke(false)
@@ -466,6 +497,124 @@ class PhotoEditorView @JvmOverloads constructor(
     fun getCurrentBitmap(): Bitmap? {
 
         return bitmap
+    }
+
+    // =========================================================================
+    // IMAGE TRANSFORM - PHASE 6.1
+    // =========================================================================
+
+    /**
+     * Flips the current image horizontally while preserving its dimensions.
+     *
+     * Editor elements are stored in image coordinates, so their horizontal
+     * position must be mirrored together with the bitmap. Text rotation and
+     * horizontal alignment are mirrored as well so the text remains visually
+     * aligned with the flipped image without changing its size or styling.
+     *
+     * Horizontal flip is intentionally disabled while Crop Mode is active.
+     * Crop Mode owns a temporary bitmap/crop coordinate system and has its own
+     * Cancel Crop snapshot; allowing an image transform here would make that
+     * session state unnecessarily unsafe.
+     */
+    fun flipHorizontal() {
+
+        if (isCropMode || isRotationMode) {
+            Log.d(TAG, "Horizontal flip ignored: another editor mode is active")
+            return
+        }
+
+        val currentBitmap = bitmap
+
+        if (currentBitmap == null) {
+            Log.d(
+                TAG,
+                "Horizontal flip ignored: no image selected"
+            )
+            return
+        }
+
+        val imageWidth = currentBitmap.width.toFloat()
+
+        if (currentBitmap.width <= 0 || currentBitmap.height <= 0) {
+            Log.w(
+                TAG,
+                "Horizontal flip ignored: invalid bitmap dimensions"
+            )
+            return
+        }
+
+        beginRotationSessionIfNeeded()
+
+        try {
+            // Draw into a new bitmap using a canvas centered on the image.
+            // This keeps the exact width/height and avoids changing the
+            // existing image-to-screen matrix architecture.
+            val flippedBitmap = Bitmap.createBitmap(
+                currentBitmap.width,
+                currentBitmap.height,
+                Bitmap.Config.ARGB_8888
+            )
+
+            val flipCanvas = Canvas(flippedBitmap)
+
+            flipCanvas.save()
+            flipCanvas.scale(
+                -1f,
+                1f,
+                imageWidth / 2f,
+                currentBitmap.height / 2f
+            )
+            flipCanvas.drawBitmap(
+                currentBitmap,
+                0f,
+                0f,
+                bitmapPaint
+            )
+            flipCanvas.restore()
+
+            // Mirror every editor element in the same image coordinate space.
+            // TextElement is currently the concrete editor element in the
+            // project, so keep this localized instead of changing the
+            // EditorElement contract.
+            elements.forEach { element ->
+                when (element) {
+                    is TextElement -> {
+                        transformTextForHorizontalFlip(
+                            textElement = element,
+                            imageWidth = imageWidth
+                        )
+                    }
+
+                    else -> Unit
+                }
+            }
+
+            bitmap = flippedBitmap
+
+            // The bitmap dimensions did not change, so the existing zoom and
+            // pan transform remains valid. Clear only transient gesture state.
+            transformMode = TransformMode.NONE
+            isMovingElement = false
+            isDragging = false
+
+            Log.d(
+                TAG,
+                "Horizontal flip applied: " +
+                        "${currentBitmap.width}x${currentBitmap.height}, " +
+                        "elements=${elements.size}, " +
+                        "scaleFactor=$scaleFactor, " +
+                        "translation=($translationX,$translationY)"
+            )
+
+            invalidate()
+
+        } catch (exception: Exception) {
+            Log.e(
+                TAG,
+                "Failed to flip image horizontally",
+                exception
+            )
+        }
     }
 
     // =========================================================================
@@ -684,6 +833,11 @@ class PhotoEditorView @JvmOverloads constructor(
      * are implemented in the following Phase 5 steps.
      */
     fun enterCropMode() {
+
+        if (isRotationMode) {
+            Log.d(TAG, "Cannot enter crop mode while rotation mode is active")
+            return
+        }
 
         if (bitmap == null) {
 
@@ -1166,14 +1320,9 @@ class PhotoEditorView @JvmOverloads constructor(
             elements.forEach { element ->
                 when (element) {
                     is TextElement -> {
-                        val oldX = element.position.x
-                        val oldY = element.position.y
-
-                        element.position.x = oldHeight - oldY
-                        element.position.y = oldX
-
-                        element.rotation = normalizeRotation(
-                            element.rotation + 90f
+                        transformTextForRotateRight90(
+                            textElement = element,
+                            oldImageHeight = oldHeight
                         )
                     }
 
@@ -1249,6 +1398,559 @@ class PhotoEditorView @JvmOverloads constructor(
                 exception
             )
         }
+    }
+
+    // =========================================================================
+    // TRANSFORM SESSION - PHASE 6.9
+    // =========================================================================
+
+    /**
+     * Enters the temporary Transform Mode. All Flip/Rotate operations made
+     * while this mode is active are previews until Apply is pressed. Cancel
+     * restores the complete editor state captured at entry.
+     */
+    fun enterTransformMode() {
+        if (isCropMode) {
+            Log.d(TAG, "Transform mode ignored: crop mode is active")
+            return
+        }
+
+        if (bitmap == null) {
+            Log.d(TAG, "Transform mode ignored: no image selected")
+            return
+        }
+
+        if (isRotationMode) {
+            Log.d(TAG, "Transform mode ignored: already active")
+            return
+        }
+
+        beginRotationSessionIfNeeded()
+    }
+
+    fun isRotationMode(): Boolean = isRotationMode
+
+    /** Starts a temporary transform session and snapshots the complete editor state. */
+    private fun beginRotationSessionIfNeeded() {
+        if (isRotationMode || isCropMode) return
+
+        val currentBitmap = bitmap ?: return
+        val selected = selectedElement
+        val snapshots = elements.map { element ->
+            when (element) {
+                is TextElement -> element.copyForCropSession()
+                else -> element
+            }
+        }
+
+        rotationOriginalBitmap = currentBitmap
+        rotationOriginalElements = snapshots
+        val selectedIndex = elements.indexOf(selected)
+        rotationOriginalSelectedElement =
+            if (selectedIndex >= 0) snapshots.getOrNull(selectedIndex) else null
+        rotationOriginalScaleFactor = scaleFactor
+        rotationOriginalTranslationX = translationX
+        rotationOriginalTranslationY = translationY
+        isRotationMode = true
+
+        // Rotation preview owns the transform gesture state, but selection is
+        // intentionally preserved so Apply Rotation does not unexpectedly
+        // deselect the active editor element.
+        transformMode = TransformMode.NONE
+        isMovingElement = false
+        isDragging = false
+
+        onRotationModeChanged?.invoke(true)
+
+        Log.d(TAG, "Transform session started: bitmap=${currentBitmap.width}x${currentBitmap.height}, elements=${elements.size}")
+    }
+
+    /** Commits the current transform preview. */
+    fun applyRotation() {
+        if (!isRotationMode) {
+            Log.d(TAG, "Apply rotation ignored: rotation mode is not active")
+            return
+        }
+
+        clearRotationSessionSnapshot()
+        isRotationMode = false
+        resetGestureState()
+        onRotationModeChanged?.invoke(false)
+        invalidate()
+        Log.d(TAG, "Transform applied")
+    }
+
+    /** Restores the exact editor state captured before transform preview began. */
+    fun cancelRotation() {
+        if (!isRotationMode) {
+            Log.d(TAG, "Cancel rotation ignored: rotation mode is not active")
+            return
+        }
+
+        val originalBitmap = rotationOriginalBitmap
+        val originalElements = rotationOriginalElements
+
+        if (originalBitmap == null || originalElements == null) {
+            Log.w(TAG, "Cancel rotation failed: rotation session snapshot is missing")
+            exitRotationModeWithoutRestore()
+            return
+        }
+
+        bitmap = originalBitmap
+        elements.clear()
+        elements.addAll(originalElements)
+        selectedElement = rotationOriginalSelectedElement
+        elements.forEach { it.isSelected = it === selectedElement }
+
+        scaleFactor = rotationOriginalScaleFactor
+        translationX = rotationOriginalTranslationX
+        translationY = rotationOriginalTranslationY
+        resetGestureState()
+
+        clearRotationSessionSnapshot()
+        isRotationMode = false
+        notifySelectionChanged()
+        onRotationModeChanged?.invoke(false)
+        invalidate()
+
+        Log.d(TAG, "Transform cancelled. Original image restored: ${originalBitmap.width}x${originalBitmap.height}")
+    }
+
+    private fun exitRotationModeWithoutRestore() {
+        clearRotationSessionSnapshot()
+        isRotationMode = false
+        transformMode = TransformMode.NONE
+        isMovingElement = false
+        isDragging = false
+        onRotationModeChanged?.invoke(false)
+        invalidate()
+    }
+
+    private fun clearRotationSessionSnapshot() {
+        rotationOriginalBitmap = null
+        rotationOriginalElements = null
+        rotationOriginalSelectedElement = null
+        rotationOriginalScaleFactor = MIN_SCALE
+        rotationOriginalTranslationX = 0f
+        rotationOriginalTranslationY = 0f
+    }
+
+    // =========================================================================
+    // IMAGE TRANSFORM - PHASE 6.3
+    // =========================================================================
+
+    /**
+     * Rotates the current image 90 degrees counter-clockwise.
+     *
+     * A 90-degree rotation swaps the bitmap dimensions, so editor elements
+     * stored in image coordinates must also be transformed into the new
+     * coordinate system. Text rotation is adjusted by -90 degrees so the
+     * text remains aligned with the rotated image.
+     *
+     * Rotation is intentionally disabled while Crop Mode is active. Crop Mode
+     * has its own rotation operation and session snapshot/state handling.
+     */
+    fun rotateLeft90() {
+
+        if (isCropMode) {
+            Log.d(
+                TAG,
+                "Rotate left ignored: crop mode is active"
+            )
+            return
+        }
+
+        val currentBitmap = bitmap
+
+        if (currentBitmap == null) {
+            Log.d(
+                TAG,
+                "Rotate left ignored: no image selected"
+            )
+            return
+        }
+
+        if (currentBitmap.width <= 0 || currentBitmap.height <= 0) {
+            Log.w(
+                TAG,
+                "Rotate left ignored: invalid bitmap dimensions"
+            )
+            return
+        }
+
+        beginRotationSessionIfNeeded()
+
+        val oldWidth = currentBitmap.width.toFloat()
+        val oldHeight = currentBitmap.height.toFloat()
+
+        try {
+            // Android's negative 90 degree rotation rotates the bitmap
+            // counter-clockwise. Bitmap.createBitmap() also returns a bitmap
+            // with swapped width/height for this quarter-turn.
+            val rotationMatrix = Matrix().apply {
+                postRotate(-90f)
+            }
+
+            val rotatedBitmap = Bitmap.createBitmap(
+                currentBitmap,
+                0,
+                0,
+                currentBitmap.width,
+                currentBitmap.height,
+                rotationMatrix,
+                true
+            )
+
+            // For a 90-degree counter-clockwise rotation in Android image
+            // coordinates (Y increases downward):
+            //
+            //     (x, y) -> (y, W - x)
+            //
+            // W is the width of the original image.
+            elements.forEach { element ->
+                when (element) {
+                    is TextElement -> {
+                        transformTextForRotateLeft90(
+                            textElement = element,
+                            oldImageWidth = oldWidth
+                        )
+                    }
+
+                    else -> Unit
+                }
+            }
+
+            bitmap = rotatedBitmap
+
+            // The image dimensions changed, so the previous zoom/pan transform
+            // is no longer guaranteed to be appropriate for the new aspect
+            // ratio. Fit the rotated image back into the editor.
+            resetTransform()
+
+            // Clear only transient gesture state. Selection and editor
+            // elements remain intact.
+            transformMode = TransformMode.NONE
+            isMovingElement = false
+            isDragging = false
+
+            Log.d(
+                TAG,
+                "Image rotated 90 degrees counter-clockwise: " +
+                        "${currentBitmap.width}x${currentBitmap.height} -> " +
+                        "${rotatedBitmap.width}x${rotatedBitmap.height}, " +
+                        "elements=${elements.size}"
+            )
+
+            invalidate()
+
+        } catch (exception: Exception) {
+            Log.e(
+                TAG,
+                "Failed to rotate image 90 degrees counter-clockwise",
+                exception
+            )
+        }
+    }
+
+    /**
+     * Rotates the current image 90 degrees clockwise.
+     *
+     * Editor elements are stored in image coordinates, so their positions
+     * must be transformed with the bitmap. Rotation changes the bitmap
+     * dimensions (width and height are swapped), therefore the editor
+     * transform is reset after the rotation so the new image fits correctly.
+     *
+     * Rotate Right is intentionally disabled while Crop Mode is active.
+     */
+    fun rotateRight90() {
+
+        if (isCropMode) {
+            Log.d(
+                TAG,
+                "Rotate right ignored: crop mode is active"
+            )
+            return
+        }
+
+        val currentBitmap = bitmap
+
+        if (currentBitmap == null) {
+            Log.d(
+                TAG,
+                "Rotate right ignored: no image selected"
+            )
+            return
+        }
+
+        if (currentBitmap.width <= 0 || currentBitmap.height <= 0) {
+            Log.w(
+                TAG,
+                "Rotate right ignored: invalid bitmap dimensions"
+            )
+            return
+        }
+
+        beginRotationSessionIfNeeded()
+
+        val oldHeight = currentBitmap.height.toFloat()
+
+        try {
+            // Android's positive 90 degree rotation rotates the bitmap
+            // clockwise. Bitmap.createBitmap() returns a bitmap with swapped
+            // width/height for this quarter-turn.
+            val rotationMatrix = Matrix().apply {
+                postRotate(90f)
+            }
+
+            val rotatedBitmap = Bitmap.createBitmap(
+                currentBitmap,
+                0,
+                0,
+                currentBitmap.width,
+                currentBitmap.height,
+                rotationMatrix,
+                true
+            )
+
+            // For a 90-degree clockwise rotation in Android image
+            // coordinates (Y increases downward):
+            //
+            //     (x, y) -> (H - y, x)
+            //
+            // H is the height of the original image.
+            elements.forEach { element ->
+                when (element) {
+                    is TextElement -> {
+                        val oldX = element.position.x
+                        val oldY = element.position.y
+
+                        element.position.x = oldHeight - oldY
+                        element.position.y = oldX
+
+                        element.rotation = normalizeRotation(
+                            element.rotation + 90f
+                        )
+                    }
+
+                    else -> Unit
+                }
+            }
+
+            bitmap = rotatedBitmap
+
+            // The image dimensions changed, so fit the rotated image back
+            // into the editor using the existing transform logic.
+            resetTransform()
+
+            // Clear only transient gesture state. Selection and editor
+            // elements remain intact.
+            transformMode = TransformMode.NONE
+            isMovingElement = false
+            isDragging = false
+
+            Log.d(
+                TAG,
+                "Image rotated 90 degrees clockwise: " +
+                        "${currentBitmap.width}x${currentBitmap.height} -> " +
+                        "${rotatedBitmap.width}x${rotatedBitmap.height}, " +
+                        "elements=${elements.size}"
+            )
+
+            invalidate()
+
+        } catch (exception: Exception) {
+            Log.e(
+                TAG,
+                "Failed to rotate image 90 degrees clockwise",
+                exception
+            )
+        }
+    }
+
+    // =========================================================================
+    // IMAGE TRANSFORM - PHASE 6.2
+    // =========================================================================
+
+    /**
+     * Flips the current image vertically while preserving its dimensions.
+     *
+     * Editor elements are stored in image coordinates, so their vertical
+     * position must be mirrored together with the bitmap. Text rotation is
+     * mirrored as well. Horizontal text alignment remains unchanged because
+     * a vertical flip does not change the left/center/right relationship.
+     *
+     * Vertical flip is intentionally disabled while Crop Mode is active for
+     * the same crop-session safety reason as horizontal flip.
+     */
+    fun flipVertical() {
+
+        if (isCropMode || isRotationMode) {
+            Log.d(TAG, "Vertical flip ignored: another editor mode is active")
+            return
+        }
+
+        val currentBitmap = bitmap
+
+        if (currentBitmap == null) {
+            Log.d(
+                TAG,
+                "Vertical flip ignored: no image selected"
+            )
+            return
+        }
+
+        val imageHeight = currentBitmap.height.toFloat()
+
+        if (currentBitmap.width <= 0 || currentBitmap.height <= 0) {
+            Log.w(
+                TAG,
+                "Vertical flip ignored: invalid bitmap dimensions"
+            )
+            return
+        }
+
+        beginRotationSessionIfNeeded()
+
+        try {
+            val flippedBitmap = Bitmap.createBitmap(
+                currentBitmap.width,
+                currentBitmap.height,
+                Bitmap.Config.ARGB_8888
+            )
+
+            val flipCanvas = Canvas(flippedBitmap)
+
+            flipCanvas.save()
+            flipCanvas.scale(
+                1f,
+                -1f,
+                currentBitmap.width / 2f,
+                imageHeight / 2f
+            )
+            flipCanvas.drawBitmap(
+                currentBitmap,
+                0f,
+                0f,
+                bitmapPaint
+            )
+            flipCanvas.restore()
+
+            elements.forEach { element ->
+                when (element) {
+                    is TextElement -> {
+                        transformTextForVerticalFlip(
+                            textElement = element,
+                            imageHeight = imageHeight
+                        )
+                    }
+
+                    else -> Unit
+                }
+            }
+
+            bitmap = flippedBitmap
+
+            transformMode = TransformMode.NONE
+            isMovingElement = false
+            isDragging = false
+
+            Log.d(
+                TAG,
+                "Vertical flip applied: " +
+                        "${currentBitmap.width}x${currentBitmap.height}, " +
+                        "elements=${elements.size}, " +
+                        "scaleFactor=$scaleFactor, " +
+                        "translation=($translationX,$translationY)"
+            )
+
+            invalidate()
+
+        } catch (exception: Exception) {
+            Log.e(
+                TAG,
+                "Failed to flip image vertically",
+                exception
+            )
+        }
+    }
+
+    // =========================================================================
+    // TEXT TRANSFORM MAPPING - PHASE 6.8
+    // =========================================================================
+
+    /**
+     * Mirrors a text element across the vertical center line of the image.
+     *
+     * TextElement.position is the local text anchor, not the left edge in all
+     * alignment modes. Therefore the anchor itself is mirrored and LEFT/RIGHT
+     * alignment is swapped. This keeps the rendered text bounds mirrored
+     * exactly with the bitmap.
+     */
+    private fun transformTextForHorizontalFlip(
+        textElement: TextElement,
+        imageWidth: Float
+    ) {
+        textElement.position.x = imageWidth - textElement.position.x
+        textElement.rotation = normalizeRotation(-textElement.rotation)
+
+        textElement.alignment = when (textElement.alignment) {
+            TextElement.TextAlignment.LEFT ->
+                TextElement.TextAlignment.RIGHT
+
+            TextElement.TextAlignment.CENTER ->
+                TextElement.TextAlignment.CENTER
+
+            TextElement.TextAlignment.RIGHT ->
+                TextElement.TextAlignment.LEFT
+        }
+    }
+
+    /**
+     * Mirrors a text element across the horizontal center line of the image.
+     * Horizontal alignment does not change because the reflection is vertical.
+     */
+    private fun transformTextForVerticalFlip(
+        textElement: TextElement,
+        imageHeight: Float
+    ) {
+        textElement.position.y = imageHeight - textElement.position.y
+        textElement.rotation = normalizeRotation(-textElement.rotation)
+    }
+
+    /**
+     * Maps a text anchor from the old image coordinate system into the new
+     * coordinate system after a 90-degree counter-clockwise bitmap rotation.
+     *
+     * Old (W x H) -> New (H x W): (x, y) -> (y, W - x)
+     */
+    private fun transformTextForRotateLeft90(
+        textElement: TextElement,
+        oldImageWidth: Float
+    ) {
+        val oldX = textElement.position.x
+        val oldY = textElement.position.y
+
+        textElement.position.x = oldY
+        textElement.position.y = oldImageWidth - oldX
+        textElement.rotation = normalizeRotation(textElement.rotation - 90f)
+    }
+
+    /**
+     * Maps a text anchor from the old image coordinate system into the new
+     * coordinate system after a 90-degree clockwise bitmap rotation.
+     *
+     * Old (W x H) -> New (H x W): (x, y) -> (H - y, x)
+     */
+    private fun transformTextForRotateRight90(
+        textElement: TextElement,
+        oldImageHeight: Float
+    ) {
+        val oldX = textElement.position.x
+        val oldY = textElement.position.y
+
+        textElement.position.x = oldImageHeight - oldY
+        textElement.position.y = oldX
+        textElement.rotation = normalizeRotation(textElement.rotation + 90f)
     }
 
     /**
@@ -2612,6 +3314,11 @@ class PhotoEditorView @JvmOverloads constructor(
 
     fun deleteSelectedElement() {
 
+        if (isRotationMode || isCropMode) {
+            Log.d(TAG, "Delete ignored: editor mode is active")
+            return
+        }
+
         val element =
             selectedElement
                 ?: return
@@ -3677,6 +4384,13 @@ class PhotoEditorView @JvmOverloads constructor(
 
         if (isCropMode) {
             handleCropTouch(event)
+            return true
+        }
+
+        // Rotation mode is a button-driven preview session. Ignore all canvas
+        // gestures while it is active so pan, zoom, text movement and element
+        // transforms cannot mutate the temporary rotation state.
+        if (isRotationMode) {
             return true
         }
 
