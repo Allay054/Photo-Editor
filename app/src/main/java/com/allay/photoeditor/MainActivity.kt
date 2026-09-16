@@ -22,7 +22,10 @@ import androidx.core.view.WindowInsetsCompat
 import com.allay.photoeditor.editor.PhotoEditorView
 import com.allay.photoeditor.model.EditorElement
 import com.allay.photoeditor.model.FilterType
+import com.allay.photoeditor.model.ShapeElement
+import com.allay.photoeditor.model.ShapeType
 import com.allay.photoeditor.model.TextElement
+import com.allay.photoeditor.editor.shape.ShapeController
 import com.allay.photoeditor.utils.ColorPickerDialog
 
 
@@ -37,6 +40,8 @@ private fun TextElement.TextFont.displayName(): String =
     }
 
 class MainActivity : AppCompatActivity() {
+
+    private val shapeController = ShapeController()
 
     companion object {
 
@@ -55,6 +60,42 @@ class MainActivity : AppCompatActivity() {
             Button
 
     private lateinit var btnAddText:
+            Button
+
+    private lateinit var btnAddShape:
+            Button
+
+    private lateinit var shapeToolsScroll:
+            View
+
+    private lateinit var btnShapeRectangle:
+            Button
+
+    private lateinit var btnShapeCircle:
+            Button
+
+    private lateinit var btnShapeRoundedRectangle:
+            Button
+
+    private lateinit var btnShapeTriangle:
+            Button
+
+    private lateinit var btnShapeLine:
+            Button
+
+    private lateinit var btnShapeArrow:
+            Button
+
+    private lateinit var btnShapePointer:
+            Button
+
+    private lateinit var btnShapeColor:
+            Button
+
+    private lateinit var btnShapeStrokeWidth:
+            Button
+
+    private lateinit var btnShapeFill:
             Button
 
     private lateinit var btnDelete:
@@ -361,6 +402,27 @@ class MainActivity : AppCompatActivity() {
                 R.id.btnAddText
             )
 
+        btnAddShape =
+            findViewById(
+                R.id.btnAddShape
+            )
+
+        shapeToolsScroll =
+            findViewById(
+                R.id.shapeToolsScroll
+            )
+
+        btnShapeRectangle = findViewById(R.id.btnShapeRectangle)
+        btnShapeCircle = findViewById(R.id.btnShapeCircle)
+        btnShapeRoundedRectangle = findViewById(R.id.btnShapeRoundedRectangle)
+        btnShapeTriangle = findViewById(R.id.btnShapeTriangle)
+        btnShapeLine = findViewById(R.id.btnShapeLine)
+        btnShapeArrow = findViewById(R.id.btnShapeArrow)
+        btnShapePointer = findViewById(R.id.btnShapePointer)
+        btnShapeColor = findViewById(R.id.btnShapeColor)
+        btnShapeStrokeWidth = findViewById(R.id.btnShapeStrokeWidth)
+        btnShapeFill = findViewById(R.id.btnShapeFill)
+
         btnDelete =
             findViewById(
                 R.id.btnDelete
@@ -400,6 +462,7 @@ class MainActivity : AppCompatActivity() {
         updateCropTools(false)
         adjustmentToolsScroll.visibility = View.GONE
         filterToolsScroll.visibility = View.GONE
+        shapeToolsScroll.visibility = View.GONE
         updateDeleteButton()
 
         updateTextEditButton(
@@ -903,6 +966,35 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ---------------------------------------------------------------------
+        // SHAPES - PHASE 8
+        // ---------------------------------------------------------------------
+        btnAddShape.setOnClickListener {
+            if (photoEditorView.isRotationMode()) {
+                Toast.makeText(this, "Apply or cancel Rotation first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(this, "Please select an image first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            shapeToolsScroll.visibility =
+                if (shapeToolsScroll.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+
+        btnShapeRectangle.setOnClickListener { addShape(ShapeType.RECTANGLE) }
+        btnShapeCircle.setOnClickListener { addShape(ShapeType.CIRCLE) }
+        btnShapeRoundedRectangle.setOnClickListener { addShape(ShapeType.ROUNDED_RECTANGLE) }
+        btnShapeTriangle.setOnClickListener { addShape(ShapeType.TRIANGLE) }
+        btnShapeLine.setOnClickListener { addShape(ShapeType.LINE) }
+        btnShapeArrow.setOnClickListener { addShape(ShapeType.ARROW) }
+        btnShapePointer.setOnClickListener { addShape(ShapeType.POINTER) }
+        btnShapeColor.setOnClickListener { showShapeColorDialog() }
+        btnShapeStrokeWidth.setOnClickListener { showShapeStrokeWidthDialog() }
+        btnShapeFill.setOnClickListener { toggleSelectedShapeFill() }
+
+        // ---------------------------------------------------------------------
         // DELETE SELECTED ELEMENT
         // ---------------------------------------------------------------------
 
@@ -1176,6 +1268,10 @@ class MainActivity : AppCompatActivity() {
             updateTextBackgroundColorButton(element)
             updateTextFontButton(element)
             updateTextMultiColorButton(element)
+
+            shapeToolsScroll.visibility =
+                if (element is ShapeElement) View.VISIBLE else View.GONE
+            updateShapeStyleButtons(element)
         }
 
         // ---------------------------------------------------------------------
@@ -1203,9 +1299,11 @@ class MainActivity : AppCompatActivity() {
             rotationToolsScroll.visibility = View.GONE
             cropToolsScroll.visibility = View.GONE
             textToolsScroll.visibility = View.GONE
+            shapeToolsScroll.visibility = View.GONE
             adjustmentToolsScroll.visibility = View.GONE
             btnSelectImage.isEnabled = !isFilterMode
             btnAddText.isEnabled = !isFilterMode
+            btnAddShape.isEnabled = !isFilterMode
             btnCrop.isEnabled = !isFilterMode
             btnTransform.isEnabled = !isFilterMode
             btnAdjust.isEnabled = !isFilterMode
@@ -1241,6 +1339,7 @@ class MainActivity : AppCompatActivity() {
 
             btnSelectImage.isEnabled = !isRotationMode
             btnAddText.isEnabled = !isRotationMode
+            btnAddShape.isEnabled = !isRotationMode
             btnCrop.isEnabled = !isRotationMode
             btnAdjust.isEnabled = !isRotationMode
 //            btnFlipHorizontal.isEnabled = !isRotationMode
@@ -1289,9 +1388,11 @@ class MainActivity : AppCompatActivity() {
             rotationToolsScroll.visibility = View.GONE
             cropToolsScroll.visibility = View.GONE
             textToolsScroll.visibility = View.GONE
+            shapeToolsScroll.visibility = View.GONE
 
             btnSelectImage.isEnabled = !isAdjustmentMode
             btnAddText.isEnabled = !isAdjustmentMode
+            btnAddShape.isEnabled = !isAdjustmentMode
             btnCrop.isEnabled = !isAdjustmentMode
             btnTransform.isEnabled = !isAdjustmentMode
             btnAdjust.isEnabled = !isAdjustmentMode
@@ -1332,6 +1433,7 @@ class MainActivity : AppCompatActivity() {
             updateCropTools(isCropMode)
 
             if (isCropMode) {
+                shapeToolsScroll.visibility = View.GONE
                 updateCropButtons()
             }
         }
@@ -1583,6 +1685,118 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.show()
+    }
+
+    // -------------------------------------------------------------------------
+    // SHAPE STYLING - PHASE 8.6
+    // -------------------------------------------------------------------------
+
+    private fun updateShapeStyleButtons(element: EditorElement?) {
+        val shape = element as? ShapeElement
+        val visible = shape != null
+        btnShapeColor.visibility = if (visible) View.VISIBLE else View.GONE
+        btnShapeStrokeWidth.visibility = if (visible) View.VISIBLE else View.GONE
+        btnShapeFill.visibility = if (visible) View.VISIBLE else View.GONE
+
+        if (shape != null) {
+            btnShapeColor.text = "Color"
+            btnShapeStrokeWidth.text = "Stroke: ${shape.strokeWidth.toInt()}"
+            btnShapeFill.text = if (shape.isFilled) "Fill: On" else "Fill: Off"
+        }
+    }
+
+    private fun getSelectedShape(): ShapeElement? =
+        photoEditorView.getSelectedElement() as? ShapeElement
+
+    private fun showShapeColorDialog() {
+        val shape = getSelectedShape() ?: return
+        val colors = intArrayOf(
+            Color.WHITE,
+            Color.BLACK,
+            Color.RED,
+            Color.GREEN,
+            Color.BLUE,
+            Color.YELLOW,
+            Color.CYAN,
+            Color.MAGENTA
+        )
+        val names = arrayOf(
+            "White", "Black", "Red", "Green",
+            "Blue", "Yellow", "Cyan", "Magenta"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Shape Color")
+            .setItems(names) { dialog, which ->
+                shape.color = colors[which]
+                updateShapeStyleButtons(shape)
+                photoEditorView.invalidate()
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun showShapeStrokeWidthDialog() {
+        val shape = getSelectedShape() ?: return
+        val widths = floatArrayOf(2f, 4f, 6f, 8f, 12f, 16f, 20f)
+        val labels = widths.map { "${it.toInt()} px" }.toTypedArray()
+        var selected = widths.indices.minByOrNull { kotlin.math.abs(widths[it] - shape.strokeWidth) } ?: 1
+
+        AlertDialog.Builder(this)
+            .setTitle("Stroke Width")
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                selected = which
+                shape.strokeWidth = widths[which]
+                updateShapeStyleButtons(shape)
+                photoEditorView.invalidate()
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun toggleSelectedShapeFill() {
+        val shape = getSelectedShape() ?: return
+        shape.isFilled = !shape.isFilled
+        updateShapeStyleButtons(shape)
+        photoEditorView.invalidate()
+    }
+
+    // -------------------------------------------------------------------------
+    // CREATE SHAPE ELEMENT - PHASE 8
+    // -------------------------------------------------------------------------
+
+    private fun addShape(shapeType: ShapeType) {
+        if (photoEditorView.isRotationMode()) {
+            Toast.makeText(this, "Apply or cancel Rotation first", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val imageWidth = photoEditorView.getImageWidth().toFloat()
+        val imageHeight = photoEditorView.getImageHeight().toFloat()
+
+        if (imageWidth <= 0f || imageHeight <= 0f) {
+            Toast.makeText(this, "Please select an image first", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val position = PointF(
+            imageWidth / 2f,
+            imageHeight / 2f
+        )
+
+        val shape = shapeController.createShape(
+            shapeType = shapeType,
+            position = position
+        )
+
+        photoEditorView.addElement(shape)
+        shapeToolsScroll.visibility = View.VISIBLE
+        updateDeleteButton()
+        updateShapeStyleButtons(shape)
+
+        Log.d(
+            TAG,
+            "Shape added: $shapeType"
+        )
     }
 
     // -------------------------------------------------------------------------

@@ -900,6 +900,34 @@
 
 
         <!-- ============================================================ -->
+        <!-- SHAPE TOOLS - PHASE 8 -->
+        <HorizontalScrollView
+            android:id="@+id/shapeToolsScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fillViewport="false"
+            android:scrollbars="none"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button android:id="@+id/btnShapeRectangle" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Rectangle" android:textAllCaps="false" android:textSize="14sp" />
+                <Button android:id="@+id/btnShapeCircle" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Circle" android:textAllCaps="false" android:textSize="14sp" />
+                <Button android:id="@+id/btnShapeRoundedRectangle" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Rounded" android:textAllCaps="false" android:textSize="14sp" />
+                <Button android:id="@+id/btnShapeTriangle" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Triangle" android:textAllCaps="false" android:textSize="14sp" />
+                <Button android:id="@+id/btnShapeLine" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Line" android:textAllCaps="false" android:textSize="14sp" />
+                <Button android:id="@+id/btnShapeArrow" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Arrow" android:textAllCaps="false" android:textSize="14sp" />
+                <Button android:id="@+id/btnShapePointer" android:layout_width="wrap_content" android:layout_height="44dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Pointer" android:textAllCaps="false" android:textSize="14sp" />
+                <Button android:id="@+id/btnShapeColor" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Color" android:textAllCaps="false" android:textSize="14sp" android:visibility="gone" />
+                <Button android:id="@+id/btnShapeStrokeWidth" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Stroke" android:textAllCaps="false" android:textSize="14sp" android:visibility="gone" />
+                <Button android:id="@+id/btnShapeFill" android:layout_width="wrap_content" android:layout_height="44dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Fill: Off" android:textAllCaps="false" android:textSize="14sp" android:visibility="gone" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
+
         <!-- MAIN ACTIONS                                                  -->
         <!-- Adjust and Filters stay in the main toolbar row.             -->
         <!-- ============================================================ -->
@@ -948,6 +976,21 @@
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
                     android:text="Add Text"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+
+                <!-- Add Shape -->
+                <Button
+                    android:id="@+id/btnAddShape"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Add Shape"
                     android:textAllCaps="false"
                     android:textSize="14sp" />
 

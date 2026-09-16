@@ -19,6 +19,9 @@ import com.allay.photoeditor.editor.filter.FilterController
 import com.allay.photoeditor.model.EditorElement
 import com.allay.photoeditor.model.FilterType
 import com.allay.photoeditor.model.TextElement
+import com.allay.photoeditor.model.ShapeElement
+import com.allay.photoeditor.model.ShapeType
+import com.allay.photoeditor.editor.shape.ShapeController
 import com.allay.photoeditor.editor.adjustment.AdjustmentController
 import com.allay.photoeditor.editor.crop.CropController
 import com.allay.photoeditor.editor.drawing.EditorRenderer
@@ -62,6 +65,18 @@ class PhotoEditorView @JvmOverloads constructor(
         private const val HANDLE_TOUCH_RADIUS = 40f
 
         private const val ROTATION_HANDLE_DISTANCE = 70f
+
+        // Shape delete handle is placed outside the top-right corner.
+        private const val SHAPE_DELETE_HANDLE_DISTANCE = 56f
+
+        // Larger visible target for the floating delete action.
+        private const val SHAPE_DELETE_BUTTON_RADIUS = 25f
+        private const val SHAPE_DELETE_BUTTON_TOUCH_RADIUS = 36f
+
+        // Text uses the same prominent floating delete action as shapes.
+        private const val TEXT_DELETE_HANDLE_DISTANCE = 56f
+        private const val TEXT_DELETE_BUTTON_RADIUS = 25f
+        private const val TEXT_DELETE_BUTTON_TOUCH_RADIUS = 36f
 
         // ---------------------------------------------------------------------
         // CROP
@@ -286,6 +301,14 @@ class PhotoEditorView @JvmOverloads constructor(
     }
 
     // =========================================================================
+    // SHAPES - PHASE 8
+    // =========================================================================
+
+    /** Owns creation of editor shapes while PhotoEditorView keeps the common
+     * element selection, movement and transform pipeline. */
+    private val shapeController = ShapeController()
+
+    // =========================================================================
     // FILTER / ADJUSTMENT MODE
     // =========================================================================
 
@@ -296,6 +319,41 @@ class PhotoEditorView @JvmOverloads constructor(
     private var initialElementScale = 1f
 
     private var initialResizeDistance = 1f
+
+    /**
+     * Creates and adds a shape at the center of the current image.
+     *
+     * The new shape is automatically selected through addElement(), so the
+     * existing selection callback and Delete button continue to work.
+     */
+    fun addShape(shapeType: ShapeType): Boolean {
+        val currentBitmap = bitmap
+
+        if (currentBitmap == null) {
+            Log.d(TAG, "Cannot add shape. No image selected.")
+            return false
+        }
+
+        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
+            Log.d(TAG, "Cannot add shape. Editor mode is active.")
+            return false
+        }
+
+        val position = PointF(
+            currentBitmap.width / 2f,
+            currentBitmap.height / 2f
+        )
+
+        val shape: ShapeElement = shapeController.createShape(
+            shapeType = shapeType,
+            position = position
+        )
+
+        addElement(shape)
+
+        Log.d(TAG, "Shape added: $shapeType")
+        return true
+    }
 
     // =========================================================================
     // ELEMENTS
@@ -2778,6 +2836,471 @@ class PhotoEditorView @JvmOverloads constructor(
     }
 
     // =========================================================================
+    // SHAPE TRANSFORM HANDLES
+    // =========================================================================
+
+    private fun getShapeResizeHandlePosition(shape: ShapeElement): PointF {
+        return transformShapePoint(
+            shape,
+            PointF(shape.width / 2f, shape.height / 2f)
+        )
+    }
+
+    private fun getShapeRotationHandlePosition(shape: ShapeElement): PointF {
+        return transformShapePoint(
+            shape,
+            PointF(0f, -shape.height / 2f - ROTATION_HANDLE_DISTANCE)
+        )
+    }
+
+    private fun transformShapePoint(shape: ShapeElement, localPoint: PointF): PointF {
+        val radians = Math.toRadians(shape.rotation.toDouble())
+        val cosValue = cos(radians).toFloat()
+        val sinValue = sin(radians).toFloat()
+        val scaledX = localPoint.x * shape.scale
+        val scaledY = localPoint.y * shape.scale
+        val rotatedX = scaledX * cosValue - scaledY * sinValue
+        val rotatedY = scaledX * sinValue + scaledY * cosValue
+        return imageToScreen(
+            shape.position.x + rotatedX,
+            shape.position.y + rotatedY
+        ) ?: PointF()
+    }
+
+    private fun isOnShapeRotationHandle(eventX: Float, eventY: Float): Boolean {
+        val shape = selectedElement as? ShapeElement ?: return false
+        val handle = getShapeRotationHandlePosition(shape)
+        return distance(eventX, eventY, handle.x, handle.y) <= SHAPE_DELETE_BUTTON_TOUCH_RADIUS
+    }
+
+    private fun getShapeDeleteHandlePosition(shape: ShapeElement): PointF {
+        return transformShapePoint(
+            shape,
+            PointF(
+                shape.width / 2f + SHAPE_DELETE_HANDLE_DISTANCE,
+                -shape.height / 2f - SHAPE_DELETE_HANDLE_DISTANCE
+            )
+        )
+    }
+
+    private fun isOnShapeDeleteHandle(eventX: Float, eventY: Float): Boolean {
+        val shape = selectedElement as? ShapeElement ?: return false
+        val handle = getShapeDeleteHandlePosition(shape)
+        return distance(eventX, eventY, handle.x, handle.y) <= HANDLE_TOUCH_RADIUS
+    }
+
+    private fun isOnShapeResizeHandle(eventX: Float, eventY: Float): Boolean {
+        val shape = selectedElement as? ShapeElement ?: return false
+        val handle = getShapeResizeHandlePosition(shape)
+        return distance(eventX, eventY, handle.x, handle.y) <= HANDLE_TOUCH_RADIUS
+    }
+
+    private fun startShapeRotation(touchX: Float, touchY: Float) {
+        val shape = selectedElement as? ShapeElement ?: return
+        transformMode = TransformMode.ROTATE
+        initialRotation = shape.rotation
+        val center = imageToScreen(shape.position.x, shape.position.y) ?: return
+        initialRotationAngle = Math.toDegrees(
+            atan2((touchY - center.y).toDouble(), (touchX - center.x).toDouble())
+        ).toFloat()
+        Log.d(TAG, "Shape rotation started: $initialRotation")
+    }
+
+    private fun updateShapeRotation(touchX: Float, touchY: Float) {
+        val shape = selectedElement as? ShapeElement ?: return
+        val center = imageToScreen(shape.position.x, shape.position.y) ?: return
+        val currentAngle = Math.toDegrees(
+            atan2((touchY - center.y).toDouble(), (touchX - center.x).toDouble())
+        ).toFloat()
+        var delta = currentAngle - initialRotationAngle
+        while (delta > 180f) delta -= 360f
+        while (delta < -180f) delta += 360f
+        var newRotation = initialRotation + delta
+        while (newRotation < 0f) newRotation += 360f
+        while (newRotation >= 360f) newRotation -= 360f
+        shape.rotation = newRotation
+        invalidate()
+    }
+
+    private fun startShapeResize(touchX: Float, touchY: Float) {
+        val shape = selectedElement as? ShapeElement ?: return
+        transformMode = TransformMode.RESIZE
+        initialElementScale = shape.scale
+        val center = imageToScreen(shape.position.x, shape.position.y) ?: return
+        initialResizeDistance = distance(center.x, center.y, touchX, touchY).coerceAtLeast(1f)
+        Log.d(TAG, "Shape resize started: $initialElementScale")
+    }
+
+    private fun updateShapeResize(touchX: Float, touchY: Float) {
+        val shape = selectedElement as? ShapeElement ?: return
+        val center = imageToScreen(shape.position.x, shape.position.y) ?: return
+        val currentDistance = distance(center.x, center.y, touchX, touchY)
+        if (initialResizeDistance <= 0f) return
+        shape.scale = (initialElementScale * currentDistance / initialResizeDistance)
+            .coerceIn(MIN_ELEMENT_SCALE, MAX_ELEMENT_SCALE)
+        invalidate()
+    }
+
+    private fun drawShapeSelectionHandles(canvas: Canvas, shape: ShapeElement) {
+        val topLeft = transformShapePoint(shape, PointF(-shape.width / 2f, -shape.height / 2f))
+        val topRight = transformShapePoint(shape, PointF(shape.width / 2f, -shape.height / 2f))
+        val bottomLeft = transformShapePoint(shape, PointF(-shape.width / 2f, shape.height / 2f))
+        val bottomRight = transformShapePoint(shape, PointF(shape.width / 2f, shape.height / 2f))
+        val rotationHandle = getShapeRotationHandlePosition(shape)
+        val resizeHandle = getShapeResizeHandlePosition(shape)
+        val deleteHandle = getShapeDeleteHandlePosition(shape)
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 3f
+            color = Color.WHITE
+        }
+        val handleFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.WHITE
+        }
+        val handleStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+            color = Color.BLACK
+        }
+
+        canvas.drawLine(topLeft.x, topLeft.y, topRight.x, topRight.y, paint)
+        canvas.drawLine(topRight.x, topRight.y, bottomRight.x, bottomRight.y, paint)
+        canvas.drawLine(bottomRight.x, bottomRight.y, bottomLeft.x, bottomLeft.y, paint)
+        canvas.drawLine(bottomLeft.x, bottomLeft.y, topLeft.x, topLeft.y, paint)
+        canvas.drawLine(
+            (topLeft.x + topRight.x) / 2f,
+            (topLeft.y + topRight.y) / 2f,
+            rotationHandle.x,
+            rotationHandle.y,
+            paint
+        )
+
+        // Connector from the top-right corner to the delete handle.
+        canvas.drawLine(
+            topRight.x,
+            topRight.y,
+            deleteHandle.x,
+            deleteHandle.y,
+            paint
+        )
+
+        val radius = 11f
+
+        listOf(topLeft, topRight, bottomLeft, bottomRight, rotationHandle, resizeHandle).forEach { point ->
+            canvas.drawCircle(point.x, point.y, radius, handleFill)
+            canvas.drawCircle(point.x, point.y, radius, handleStroke)
+        }
+
+        // ---------------------------------------------------------------------
+        // FLOATING DELETE ACTION
+        // ---------------------------------------------------------------------
+        // Delete is intentionally different from the transform handles.
+        // A prominent red floating button makes the destructive action obvious
+        // and prevents it from being confused with resize/rotation handles.
+        val deleteShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.BLACK
+            alpha = 150
+        }
+        val deleteButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.rgb(220, 45, 45)
+        }
+        val deleteButtonStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2.5f
+            color = Color.WHITE
+        }
+
+        // Small offset gives the floating button visual separation.
+        canvas.drawCircle(
+            deleteHandle.x,
+            deleteHandle.y + 3f,
+            SHAPE_DELETE_BUTTON_RADIUS + 2f,
+            deleteShadowPaint
+        )
+        canvas.drawCircle(
+            deleteHandle.x,
+            deleteHandle.y,
+            SHAPE_DELETE_BUTTON_RADIUS,
+            deleteButtonPaint
+        )
+        canvas.drawCircle(
+            deleteHandle.x,
+            deleteHandle.y,
+            SHAPE_DELETE_BUTTON_RADIUS,
+            deleteButtonStroke
+        )
+
+        // Bold white trash-can icon.
+        val trashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.WHITE
+        }
+        val trashBody = RectF(
+            deleteHandle.x - 8f,
+            deleteHandle.y - 6f,
+            deleteHandle.x + 8f,
+            deleteHandle.y + 9f
+        )
+        canvas.drawRoundRect(
+            trashBody,
+            2f,
+            2f,
+            trashPaint
+        )
+        canvas.drawRect(
+            deleteHandle.x - 10f,
+            deleteHandle.y - 10f,
+            deleteHandle.x + 10f,
+            deleteHandle.y - 6f,
+            trashPaint
+        )
+        canvas.drawRoundRect(
+            RectF(
+                deleteHandle.x - 4f,
+                deleteHandle.y - 13f,
+                deleteHandle.x + 4f,
+                deleteHandle.y - 9f
+            ),
+            1.5f,
+            1.5f,
+            trashPaint
+        )
+
+        // Cut two narrow slots into the icon to make the trash can
+        // immediately recognizable even on small screens.
+        val slotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 1.8f
+            strokeCap = Paint.Cap.ROUND
+            color = Color.rgb(220, 45, 45)
+        }
+        canvas.drawLine(
+            deleteHandle.x - 3f,
+            deleteHandle.y - 3f,
+            deleteHandle.x - 3f,
+            deleteHandle.y + 5f,
+            slotPaint
+        )
+        canvas.drawLine(
+            deleteHandle.x + 3f,
+            deleteHandle.y - 3f,
+            deleteHandle.x + 3f,
+            deleteHandle.y + 5f,
+            slotPaint
+        )
+    }
+
+    // =========================================================================
+    // TEXT FLOATING DELETE ACTION
+    // =========================================================================
+
+    /**
+     * Returns the screen position of the floating delete action for the
+     * currently selected text element.
+     *
+     * The button is deliberately placed outside the top-right corner so it
+     * remains visually separate from the resize and rotation handles.
+     */
+    private fun getTextDeleteHandlePosition(
+        textElement: TextElement
+    ): PointF {
+
+        /*
+         * IMPORTANT:
+         *
+         * TextElement.getBounds() already returns the element bounds in
+         * IMAGE/WORLD coordinates, including its current scale and rotation.
+         *
+         * The previous implementation passed those coordinates through
+         * transformElementPoint(), which applies the text position/scale/
+         * rotation a second time. That caused the delete button to appear
+         * far away from the selected text.
+         *
+         * Keep the delete action close to the actual selected bounds, just
+         * like the ShapeElement delete action.
+         */
+        val bounds = textElement.getBounds()
+
+        val topRight = imageToScreen(
+            bounds.right,
+            bounds.top
+        ) ?: return PointF()
+
+        return PointF(
+            topRight.x + TEXT_DELETE_HANDLE_DISTANCE,
+            topRight.y - TEXT_DELETE_HANDLE_DISTANCE
+        )
+    }
+
+    private fun isOnTextDeleteHandle(
+        eventX: Float,
+        eventY: Float
+    ): Boolean {
+
+        val textElement =
+            selectedElement as? TextElement
+                ?: return false
+
+        val handle =
+            getTextDeleteHandlePosition(
+                textElement
+            )
+
+        return distance(
+            eventX,
+            eventY,
+            handle.x,
+            handle.y
+        ) <= TEXT_DELETE_BUTTON_TOUCH_RADIUS
+    }
+
+    /**
+     * Draws the same prominent floating delete action used for shapes.
+     * Keeping the visual treatment identical makes deletion predictable for
+     * every editor element without confusing it with transform handles.
+     */
+    private fun drawTextDeleteButton(
+        canvas: Canvas,
+        textElement: TextElement
+    ) {
+
+        val deleteHandle =
+            getTextDeleteHandlePosition(
+                textElement
+            )
+
+        val bounds = textElement.getBounds()
+
+        // getBounds() already returns transformed IMAGE/WORLD coordinates.
+        // Convert that corner directly to screen coordinates. Do not call
+        // transformElementPoint() here because that would apply the text
+        // transform a second time and send the connector away from the text.
+        val topRight = imageToScreen(
+            bounds.right,
+            bounds.top
+        ) ?: return
+
+        val connectorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+            color = Color.WHITE
+            alpha = 180
+        }
+
+        canvas.drawLine(
+            topRight.x,
+            topRight.y,
+            deleteHandle.x,
+            deleteHandle.y,
+            connectorPaint
+        )
+
+        val deleteShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.BLACK
+            alpha = 150
+        }
+
+        val deleteButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.rgb(220, 45, 45)
+        }
+
+        val deleteButtonStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2.5f
+            color = Color.WHITE
+        }
+
+        canvas.drawCircle(
+            deleteHandle.x,
+            deleteHandle.y + 3f,
+            TEXT_DELETE_BUTTON_RADIUS + 2f,
+            deleteShadowPaint
+        )
+
+        canvas.drawCircle(
+            deleteHandle.x,
+            deleteHandle.y,
+            TEXT_DELETE_BUTTON_RADIUS,
+            deleteButtonPaint
+        )
+
+        canvas.drawCircle(
+            deleteHandle.x,
+            deleteHandle.y,
+            TEXT_DELETE_BUTTON_RADIUS,
+            deleteButtonStroke
+        )
+
+        val trashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.WHITE
+        }
+
+        val trashBody = RectF(
+            deleteHandle.x - 8f,
+            deleteHandle.y - 6f,
+            deleteHandle.x + 8f,
+            deleteHandle.y + 9f
+        )
+
+        canvas.drawRoundRect(
+            trashBody,
+            2f,
+            2f,
+            trashPaint
+        )
+
+        canvas.drawRect(
+            deleteHandle.x - 10f,
+            deleteHandle.y - 10f,
+            deleteHandle.x + 10f,
+            deleteHandle.y - 6f,
+            trashPaint
+        )
+
+        canvas.drawRoundRect(
+            RectF(
+                deleteHandle.x - 4f,
+                deleteHandle.y - 13f,
+                deleteHandle.x + 4f,
+                deleteHandle.y - 9f
+            ),
+            1.5f,
+            1.5f,
+            trashPaint
+        )
+
+        val slotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 1.8f
+            strokeCap = Paint.Cap.ROUND
+            color = Color.rgb(220, 45, 45)
+        }
+
+        canvas.drawLine(
+            deleteHandle.x - 3f,
+            deleteHandle.y - 3f,
+            deleteHandle.x - 3f,
+            deleteHandle.y + 5f,
+            slotPaint
+        )
+
+        canvas.drawLine(
+            deleteHandle.x + 3f,
+            deleteHandle.y - 3f,
+            deleteHandle.x + 3f,
+            deleteHandle.y + 5f,
+            slotPaint
+        )
+    }
+
+    // =========================================================================
     // ROTATION HANDLE
     // =========================================================================
 
@@ -2785,29 +3308,22 @@ class PhotoEditorView @JvmOverloads constructor(
         textElement: TextElement
     ): PointF {
 
-        val bounds =
-            textElement.getBounds()
-
         /*
-         * Handle starts from the top-center
-         * of the element.
+         * TextElement.getBounds() already contains the transformed bounds
+         * in image/world coordinates. Do not pass these values through
+         * transformElementPoint(), otherwise the element transform is applied
+         * twice and the handle moves away from the text.
          */
-        val localX =
-            (bounds.left + bounds.right) / 2f
+        val bounds = textElement.getBounds()
 
-        val localY =
-            bounds.top -
-                    ROTATION_HANDLE_DISTANCE
+        val topCenter = imageToScreen(
+            (bounds.left + bounds.right) / 2f,
+            bounds.top
+        ) ?: return PointF()
 
-        val localPoint =
-            PointF(
-                localX,
-                localY
-            )
-
-        return transformElementPoint(
-            textElement,
-            localPoint
+        return PointF(
+            topCenter.x,
+            topCenter.y - ROTATION_HANDLE_DISTANCE
         )
     }
 
@@ -2819,19 +3335,17 @@ class PhotoEditorView @JvmOverloads constructor(
         textElement: TextElement
     ): PointF {
 
-        val bounds =
-            textElement.getBounds()
+        /*
+         * getBounds() is already in image/world coordinates, so convert the
+         * bottom-right corner directly to screen coordinates. This keeps the
+         * resize handle attached to the selection box at every text scale.
+         */
+        val bounds = textElement.getBounds()
 
-        val localPoint =
-            PointF(
-                bounds.right,
-                bounds.bottom
-            )
-
-        return transformElementPoint(
-            textElement,
-            localPoint
-        )
+        return imageToScreen(
+            bounds.right,
+            bounds.bottom
+        ) ?: PointF()
     }
 
     // =========================================================================
@@ -3315,25 +3829,33 @@ class PhotoEditorView @JvmOverloads constructor(
 
             val bounds = selectedText.getBounds()
 
-            val topLeft = transformElementPoint(
-                selectedText,
-                PointF(bounds.left, bounds.top)
-            )
+            /*
+             * TextElement.getBounds() already returns transformed image/world
+             * coordinates. Convert those four corners directly to screen
+             * coordinates. Previously transformElementPoint() was used here,
+             * which transformed an already-transformed rectangle a second
+             * time and caused the selection handles to appear far from the
+             * actual text.
+             */
+            val topLeft = imageToScreen(
+                bounds.left,
+                bounds.top
+            ) ?: PointF()
 
-            val topRight = transformElementPoint(
-                selectedText,
-                PointF(bounds.right, bounds.top)
-            )
+            val topRight = imageToScreen(
+                bounds.right,
+                bounds.top
+            ) ?: PointF()
 
-            val bottomLeft = transformElementPoint(
-                selectedText,
-                PointF(bounds.left, bounds.bottom)
-            )
+            val bottomLeft = imageToScreen(
+                bounds.left,
+                bounds.bottom
+            ) ?: PointF()
 
-            val bottomRight = transformElementPoint(
-                selectedText,
-                PointF(bounds.right, bounds.bottom)
-            )
+            val bottomRight = imageToScreen(
+                bounds.right,
+                bounds.bottom
+            ) ?: PointF()
 
             val rotationHandle = getRotationHandlePosition(selectedText)
             val resizeHandle = getResizeHandlePosition(selectedText)
@@ -3347,6 +3869,16 @@ class PhotoEditorView @JvmOverloads constructor(
                 rotationHandle = rotationHandle,
                 resizeHandle = resizeHandle
             )
+
+            drawTextDeleteButton(
+                canvas = canvas,
+                textElement = selectedText
+            )
+        }
+
+        val selectedShape = selectedElement as? ShapeElement
+        if (selectedShape != null && selectedShape.isSelected) {
+            drawShapeSelectionHandles(canvas, selectedShape)
         }
 
         if (cropModeActive) {
@@ -3439,9 +3971,58 @@ class PhotoEditorView @JvmOverloads constructor(
 
                 /*
                  * -------------------------------------------------------------
-                 * CHECK ROTATION HANDLE FIRST
+                 * CHECK FLOATING DELETE ACTIONS FIRST
                  * -------------------------------------------------------------
                  */
+
+                if (
+                    event.pointerCount == 1 &&
+                    selectedElement is ShapeElement &&
+                    isOnShapeDeleteHandle(event.x, event.y)
+                ) {
+                    Log.d(TAG, "Shape delete handle touched")
+                    deleteSelectedElement()
+                    isMovingElement = false
+                    transformMode = TransformMode.NONE
+                    return true
+                }
+
+                if (
+                    event.pointerCount == 1 &&
+                    selectedElement is ShapeElement &&
+                    isOnShapeRotationHandle(event.x, event.y)
+                ) {
+                    startShapeRotation(event.x, event.y)
+                    isMovingElement = false
+                    Log.d(TAG, "Shape rotation handle touched")
+                    return true
+                }
+
+                if (
+                    event.pointerCount == 1 &&
+                    selectedElement is ShapeElement &&
+                    isOnShapeResizeHandle(event.x, event.y)
+                ) {
+                    startShapeResize(event.x, event.y)
+                    isMovingElement = false
+                    Log.d(TAG, "Shape resize handle touched")
+                    return true
+                }
+
+                if (
+                    event.pointerCount == 1 &&
+                    selectedElement is TextElement &&
+                    isOnTextDeleteHandle(
+                        event.x,
+                        event.y
+                    )
+                ) {
+                    Log.d(TAG, "Text delete button touched")
+                    deleteSelectedElement()
+                    isMovingElement = false
+                    transformMode = TransformMode.NONE
+                    return true
+                }
 
                 if (
                     event.pointerCount == 1 &&
@@ -3597,10 +4178,11 @@ class PhotoEditorView @JvmOverloads constructor(
                     event.pointerCount == 1
                 ) {
 
-                    updateRotation(
-                        event.x,
-                        event.y
-                    )
+                    if (selectedElement is ShapeElement) {
+                        updateShapeRotation(event.x, event.y)
+                    } else {
+                        updateRotation(event.x, event.y)
+                    }
 
                     lastTouchX =
                         event.x
@@ -3623,10 +4205,11 @@ class PhotoEditorView @JvmOverloads constructor(
                     event.pointerCount == 1
                 ) {
 
-                    updateResize(
-                        event.x,
-                        event.y
-                    )
+                    if (selectedElement is ShapeElement) {
+                        updateShapeResize(event.x, event.y)
+                    } else {
+                        updateResize(event.x, event.y)
+                    }
 
                     lastTouchX =
                         event.x
