@@ -59,6 +59,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnDelete:
             Button
 
+    private lateinit var btnCrop:
+            Button
+
+    private lateinit var btnCropRotate: Button
+
+    private lateinit var cropToolsScroll: View
+    private lateinit var btnCropFree: Button
+    private lateinit var btnCropOneToOne: Button
+    private lateinit var btnCropFourToThree: Button
+    private lateinit var btnCropSixteenToNine: Button
+    private lateinit var btnCropOriginal: Button
+    private lateinit var btnCropReset: Button
+    private lateinit var btnCropApply: Button
 
     private lateinit var btnTextColor: Button
 
@@ -143,6 +156,21 @@ class MainActivity : AppCompatActivity() {
                 R.id.btnSelectImage
             )
 
+        btnCrop =
+            findViewById(
+                R.id.btnCrop
+            )
+
+        cropToolsScroll = findViewById(R.id.cropToolsScroll)
+        btnCropFree = findViewById(R.id.btnCropFree)
+        btnCropOneToOne = findViewById(R.id.btnCropOneToOne)
+        btnCropFourToThree = findViewById(R.id.btnCropFourToThree)
+        btnCropSixteenToNine = findViewById(R.id.btnCropSixteenToNine)
+        btnCropOriginal = findViewById(R.id.btnCropOriginal)
+        btnCropReset = findViewById(R.id.btnCropReset)
+        btnCropApply = findViewById(R.id.btnCropApply)
+        btnCropRotate = findViewById(R.id.btnCropRotate)
+
         btnAddText =
             findViewById(
                 R.id.btnAddText
@@ -184,6 +212,7 @@ class MainActivity : AppCompatActivity() {
 
         setupListeners()
 
+        updateCropTools(false)
         updateDeleteButton()
 
         updateTextEditButton(
@@ -271,6 +300,92 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ---------------------------------------------------------------------
+        // CROP
+        // ---------------------------------------------------------------------
+
+        btnCrop.setOnClickListener {
+
+            Log.d(
+                TAG,
+                "Crop button clicked"
+            )
+
+            if (photoEditorView.isCropMode()) {
+                Log.d(
+                    TAG,
+                    "Crop button used to cancel active crop"
+                )
+                photoEditorView.cancelCrop()
+                return@setOnClickListener
+            }
+
+            if (
+                photoEditorView.getCurrentBitmap() == null
+            ) {
+
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                return@setOnClickListener
+            }
+
+            photoEditorView.enterCropMode()
+        }
+
+        // ---------------------------------------------------------------------
+        // CROP ASPECT RATIO TOOLS
+        // ---------------------------------------------------------------------
+
+        btnCropFree.setOnClickListener {
+            Log.d(TAG, "Free crop selected")
+            photoEditorView.setFreeCropMode()
+            updateCropButtons()
+        }
+
+        btnCropOneToOne.setOnClickListener {
+            Log.d(TAG, "1:1 crop selected")
+            photoEditorView.setOneToOneCropMode()
+            updateCropButtons()
+        }
+
+        btnCropFourToThree.setOnClickListener {
+            Log.d(TAG, "4:3 crop selected")
+            photoEditorView.setFourToThreeCropMode()
+            updateCropButtons()
+        }
+
+        btnCropSixteenToNine.setOnClickListener {
+            Log.d(TAG, "16:9 crop selected")
+            photoEditorView.setSixteenToNineCropMode()
+            updateCropButtons()
+        }
+
+        btnCropOriginal.setOnClickListener {
+            Log.d(TAG, "Original ratio crop selected")
+            photoEditorView.setOriginalRatioCropMode()
+            updateCropButtons()
+        }
+
+        btnCropReset.setOnClickListener {
+            Log.d(TAG, "Reset crop clicked")
+            photoEditorView.resetCrop()
+            updateCropButtons()
+        }
+
+        btnCropApply.setOnClickListener {
+
+            Log.d(
+                TAG,
+                "Apply crop clicked"
+            )
+
+            photoEditorView.applyCrop()
+        }
+
+        // ---------------------------------------------------------------------
         // ADD TEXT
         // ---------------------------------------------------------------------
 
@@ -320,6 +435,12 @@ class MainActivity : AppCompatActivity() {
             showEditTextDialog(
                 selectedElement
             )
+        }
+
+        btnCropRotate.setOnClickListener {
+            Log.d(TAG, "Rotate 90 degrees clockwise clicked")
+            photoEditorView.rotateCrop90Degrees()
+            updateCropButtons()
         }
 
         btnTextSize.setOnClickListener {
@@ -556,6 +677,31 @@ class MainActivity : AppCompatActivity() {
             )
 
             showEditTextDialog(textElement)
+        }
+
+        // ---------------------------------------------------------------------
+        // CROP MODE CHANGED
+        // ---------------------------------------------------------------------
+
+        photoEditorView.onCropModeChanged = { isCropMode ->
+
+            Log.d(
+                TAG,
+                "Crop mode changed: $isCropMode"
+            )
+
+            btnCrop.text =
+                if (isCropMode) {
+                    "Cancel Crop"
+                } else {
+                    "Crop"
+                }
+
+            updateCropTools(isCropMode)
+
+            if (isCropMode) {
+                updateCropButtons()
+            }
         }
 
 
@@ -1645,4 +1791,67 @@ class MainActivity : AppCompatActivity() {
             btnTextEdit.visibility = View.GONE
         }
     }
+
+    // -------------------------------------------------------------------------
+    // CROP TOOLS UI
+    // -------------------------------------------------------------------------
+
+    private fun updateCropTools(isCropMode: Boolean) {
+
+        cropToolsScroll.visibility =
+            if (isCropMode) {
+                View.VISIBLE
+            } else {
+                View.GONE
+            }
+
+        Log.d(
+            TAG,
+            "Crop tools visibility: " +
+                    if (isCropMode) "VISIBLE" else "GONE"
+        )
+    }
+
+    private fun updateCropButtons() {
+
+        if (!photoEditorView.isCropMode()) {
+            return
+        }
+
+        btnCropFree.text =
+            if (photoEditorView.isFreeCropMode()) {
+                "Free: On"
+            } else {
+                "Free"
+            }
+
+        btnCropOneToOne.text =
+            if (photoEditorView.isOneToOneCropMode()) {
+                "1:1: On"
+            } else {
+                "1:1"
+            }
+
+        btnCropFourToThree.text =
+            if (photoEditorView.isFourToThreeCropMode()) {
+                "4:3: On"
+            } else {
+                "4:3"
+            }
+
+        btnCropSixteenToNine.text =
+            if (photoEditorView.isSixteenToNineCropMode()) {
+                "16:9: On"
+            } else {
+                "16:9"
+            }
+
+        btnCropOriginal.text =
+            if (photoEditorView.isOriginalRatioCropMode()) {
+                "Original: On"
+            } else {
+                "Original"
+            }
+    }
+
 }

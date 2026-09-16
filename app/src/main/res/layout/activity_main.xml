@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/main"
     android:layout_width="match_parent"
@@ -16,10 +15,10 @@
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:background="#000000"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/editorToolbar"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/editorToolbar" />
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
     <!-- ================================================================ -->
     <!-- BOTTOM EDITOR TOOLBAR                                            -->
@@ -29,16 +28,16 @@
         android:id="@+id/editorToolbar"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
         android:background="#151515"
         android:elevation="12dp"
+        android:orientation="vertical"
         android:paddingStart="8dp"
         android:paddingTop="8dp"
         android:paddingEnd="8dp"
         android:paddingBottom="8dp"
-        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent">
+        app:layout_constraintStart_toStartOf="parent">
 
         <!-- ============================================================ -->
         <!-- CONTEXTUAL TEXT TOOLS                                        -->
@@ -49,8 +48,8 @@
             android:id="@+id/textToolsScroll"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:scrollbars="none"
-            android:fillViewport="false">
+            android:fillViewport="false"
+            android:scrollbars="none">
 
             <LinearLayout
                 android:layout_width="wrap_content"
@@ -66,6 +65,7 @@
                     android:text="Edit"
                     android:textAllCaps="false"
                     android:visibility="gone" />
+
                 <Button
                     android:id="@+id/btnTextSize"
                     android:layout_width="wrap_content"
@@ -187,6 +187,132 @@
         </HorizontalScrollView>
 
         <!-- ============================================================ -->
+        <!-- CROP TOOLS                                                    -->
+        <!-- Only visible while crop mode is active.                     -->
+        <!-- ============================================================ -->
+
+        <HorizontalScrollView
+            android:id="@+id/cropToolsScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:fillViewport="false"
+            android:scrollbars="none"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/cropToolsContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnCropFree"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Free"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnCropOneToOne"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="1:1"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnCropFourToThree"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="4:3"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnCropSixteenToNine"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="16:9"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnCropOriginal"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Original"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnCropReset"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Reset"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnCropRotate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:text="Rotate 90°"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnCropApply"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:text="Apply Crop"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- ============================================================ -->
         <!-- MAIN ACTIONS                                                  -->
         <!-- ============================================================ -->
 
@@ -195,8 +321,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:scrollbars="none"
-            android:fillViewport="false">
+            android:fillViewport="false"
+            android:scrollbars="none">
 
             <LinearLayout
                 android:id="@+id/mainToolsContainer"
@@ -240,6 +366,19 @@
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
                     android:text="Select Image"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnCrop"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Crop"
                     android:textAllCaps="false"
                     android:textSize="14sp" />
 
