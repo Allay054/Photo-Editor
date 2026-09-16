@@ -358,87 +358,142 @@ The transform system provides non-destructive transform sessions for flipping an
 
 # Phase 7 — Image Adjustments
 
-The next major development phase focuses on non-destructive image adjustments with real-time preview and Apply / Cancel behavior.
+Phase 7 adds non-destructive image adjustments with real-time preview, Apply / Cancel behavior, a structured processing pipeline, and background preview processing.
 
-## 7.1 — Adjustment Mode Foundation
+## 7.1 — Image Processing Foundation
 
-* [ ] Adjustment button
-* [ ] Enter Adjustment Mode
-* [ ] Dedicated adjustment toolbar
-* [ ] Adjustment session state
-* [ ] Adjustment snapshot
-* [ ] Preview state
-* [ ] Apply adjustments
-* [ ] Cancel adjustments
-* [ ] Reset adjustments
-* [ ] Prevent conflicting editor operations
-* [ ] Preserve existing editor state
+* [x] `AdjustmentState`
+* [x] `ImageAdjustmentProcessor`
+* [x] Centralized adjustment processing pipeline
+* [x] Neutral-state optimization
+* [x] Source bitmap protection
 
-## 7.2 — Brightness
+## 7.2 — Filter Mode UI
 
-* [ ] Brightness slider
-* [ ] Real-time preview
-* [ ] Brightness reset
+* [x] Filter mode
+* [x] Dedicated filter toolbar
+* [x] Filter session state
+* [x] Apply filter
+* [x] Cancel filter
+* [x] Prevent conflicting editor operations
 
-## 7.3 — Contrast
+## 7.3 — Basic Filters
 
-* [ ] Contrast slider
-* [ ] Real-time preview
-* [ ] Contrast reset
+* [x] Original
+* [x] Grayscale
+* [x] Black & White
+* [x] Sepia
+* [x] Vintage
 
-## 7.4 — Saturation
+## 7.4 — Warm / Cool Filters
 
-* [ ] Saturation slider
-* [ ] Real-time preview
-* [ ] Saturation reset
+* [x] Warm filter
+* [x] Cool filter
 
-## 7.5 — Exposure
+## 7.5 — Basic Adjustments
 
-* [ ] Exposure adjustment
-* [ ] Real-time preview
-* [ ] Exposure reset
+* [x] Brightness
+* [x] Contrast
+* [x] Saturation
+* [x] Real-time preview
+* [x] Apply / Cancel behavior
 
-## 7.6 — Temperature
+## 7.6 — Advanced Adjustments
 
-* [ ] Warm adjustment
-* [ ] Cool adjustment
-* [ ] Temperature reset
+* [x] Exposure
+* [x] Temperature
+* [x] Highlights
+* [x] Shadows
 
-## 7.7 — Highlights & Shadows
+## 7.7 — Combined Adjustment Engine
 
-* [ ] Highlights adjustment
-* [ ] Shadows adjustment
-* [ ] Real-time preview
-* [ ] Reset controls
+* [x] Combine multiple adjustments
+* [x] Preserve original source bitmap
+* [x] Stable processing source
+* [x] Centralized processing order
+* [x] Avoid unnecessary intermediate allocations
+* [x] Reuse pixel buffer for pixel-based adjustments
 
-## 7.8 — Combined Adjustment Engine
+## 7.8 — Preview Processing
 
-* [ ] Combine multiple adjustments
-* [ ] Preserve original source bitmap
-* [ ] Apply adjustments from a stable source
-* [ ] Avoid cumulative quality degradation
-* [ ] Optimize preview rendering
+* [x] Background preview processing
+* [x] Preview state management
+* [x] Safe adjustment-session lifecycle
+* [x] Preview cancellation / stale-result protection
 
 ## 7.9 — Adjustment State Safety
 
-* [ ] Apply safety
-* [ ] Cancel safety
-* [ ] Reset safety
-* [ ] Re-enter adjustment mode safely
-* [ ] No-image safety
-* [ ] Gesture-state cleanup
-* [ ] Protect Crop Mode
-* [ ] Protect Transform Mode
+* [x] Apply safety
+* [x] Cancel safety
+* [x] Reset safety
+* [x] Re-enter adjustment mode safely
+* [x] No-image safety
+* [x] Gesture-state cleanup
+* [x] Protect Crop Mode
+* [x] Protect Transform Mode
+* [x] Protect Filter Mode
 
-## 7.10 — Adjustment UX Polish
+## 7.10 — Adjustment UX
 
-* [ ] Adjustment slider UI
-* [ ] Current value indicator
-* [ ] Reset button
-* [ ] Adjustment toolbar organization
-* [ ] Smooth preview
-* [ ] Interaction feedback
-* [ ] Final adjustment UX validation
+* [x] Adjustment controls
+* [x] Current adjustment values
+* [x] Reset controls
+* [x] Adjustment toolbar organization
+* [x] Smooth preview behavior
+* [x] Interaction feedback
+
+### Phase 7 Status
+
+**✅ COMPLETED**
+
+> Phase 7 was completed through the advanced adjustment pipeline and background preview processing. The remaining preview optimization work was intentionally deferred while preserving the stable implementation.
+
+---
+
+# 🏗️ Editor Architecture Refactor
+
+After completing the core image-editing functionality, the large `PhotoEditorView` was incrementally refactored without changing the existing editor behavior.
+
+## Extracted Responsibilities
+
+```text
+editor/
+├── PhotoEditorView.kt
+├── adjustment/
+│   └── AdjustmentController.kt
+├── filter/
+│   └── FilterController.kt
+├── crop/
+│   └── CropController.kt
+├── transform/
+│   └── TransformController.kt
+├── gesture/
+│   └── EditorGestureController.kt
+└── drawing/
+    └── EditorRenderer.kt
+```
+
+### Refactor checkpoints
+
+* [x] Extract `AdjustmentController`
+* [x] Extract `FilterController`
+* [x] Extract `CropController`
+* [x] Extract `TransformController`
+* [x] Extract `EditorGestureController`
+* [x] Extract `EditorRenderer`
+* [x] Extract bitmap rendering
+* [x] Extract editor-element rendering
+* [x] Extract text selection/handle rendering
+* [x] Extract crop overlay rendering
+* [x] Centralize rendering flow
+
+### Refactor Status
+
+**✅ COMPLETED**
+
+The refactor was performed incrementally and regression-tested after each major extraction.
+
+> Text rotation/resize handle behavior remains a separate future interaction improvement and was intentionally not mixed into this refactor.
 
 ---
 
@@ -572,8 +627,8 @@ The next major development phase focuses on non-destructive image adjustments wi
 | Phase 4 — Text Tool               | ✅ Completed    |
 | Phase 5 — Crop                    | ✅ Completed    |
 | Phase 6 — Image Transform         | ✅ Completed    |
-| Phase 7 — Image Adjustments       | 🔄 In Progress |
-| Phase 8 — Shapes                  | ⏳ Planned      |
+| Phase 7 — Image Adjustments       | ✅ Completed    |
+| Phase 8 — Shapes                  | 🔄 Next         |
 | Phase 9 — Annotation              | ⏳ Planned      |
 | Phase 10 — Layers                 | ⏳ Planned      |
 | Phase 11 — Undo / Redo            | ⏳ Planned      |
@@ -761,28 +816,40 @@ Testing includes:
 
 # 📌 Current Development Checkpoint
 
-**Phase 6 — Image Transform: ✅ COMPLETED**
+**Phase 7 — Image Adjustments: ✅ COMPLETED**
 
-The transform system is complete through **Phase 6.9 — Transform UX Polish**.
+Phase 7 is complete, including:
 
-Completed transform capabilities include:
+* Image adjustment processing foundation
+* Filter mode and basic filters
+* Warm / Cool filters
+* Brightness
+* Contrast
+* Saturation
+* Exposure
+* Temperature
+* Highlights
+* Shadows
+* Combined adjustment processing
+* Processing efficiency improvements
+* Background preview processing
+* Adjustment state safety
+* Adjustment UX
 
-* Horizontal flip
-* Vertical flip
-* 90° left rotation
-* 90° right rotation
-* Apply / Cancel transformation sessions
-* Transform state safety
-* Text alignment and positioning preservation
-* Dedicated Transform Mode
-* Transform toolbar
-* Interaction safety
+The editor architecture has also completed its incremental refactor:
+
+* `AdjustmentController`
+* `FilterController`
+* `CropController`
+* `TransformController`
+* `EditorGestureController`
+* `EditorRenderer`
 
 The next development task is:
 
-> **Phase 7.1 — Adjustment Mode Foundation**
+> **Phase 8 — Shapes**
 
-The adjustment system will be developed incrementally with a dedicated mode, preview state, Apply / Cancel behavior, and state safety before adding individual adjustment controls.
+Phase 8 will introduce reusable shape editor elements while preserving the existing image, text, crop, transform, filter, and adjustment functionality.
 
 ---
 
@@ -807,6 +874,17 @@ Phase 6.6 - Cancel Rotation
 Phase 6.7 - Transform State Safety
 Phase 6.8 - Transform + Text Alignment
 Phase 6.9 - Transform UX Polish
+Phase 7.1 - Image Processing Foundation
+Phase 7.2 - Filter Mode UI
+Phase 7.3 - Basic Filters
+Phase 7.4 - Warm / Cool Filters
+Phase 7.5 - Basic Adjustments
+Phase 7.6 - Advanced Adjustments
+Phase 7.7 - Combined Processing Pipeline
+Phase 7.8 - Background Preview Processing
+Phase 7.9 - Adjustment State Safety
+Phase 7.10 - Adjustment UX
+Architecture Refactor - Controllers + Renderer
 ```
 
 This makes it easier to track development progress and safely return to a previous stable implementation.
@@ -817,15 +895,19 @@ This makes it easier to track development progress and safely return to a previo
 
 **Current Phase:** Phase 7 — Image Adjustments
 
-**Current Task:** Phase 7.1 — Adjustment Mode Foundation
+**Current Task:** Phase 8 — Shapes
 
-**Completed Phases:** 1–6
+**Completed Phases:** 1–7
 
-**Crop Status:** ✅ Production-ready foundation completed
+**Crop Status:** ✅ Completed
 
 **Transform Status:** ✅ Completed through Phase 6.9
 
-**Next Milestone:** Adjustment Mode Foundation with preview, Apply, Cancel, and Reset support
+**Adjustment Status:** ✅ Completed through Phase 7.10
+
+**Architecture Refactor:** ✅ Controllers, gesture handling, and renderer extracted
+
+**Next Milestone:** Phase 8 — Shapes
 
 ---
 

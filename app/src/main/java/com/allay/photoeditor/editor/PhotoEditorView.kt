@@ -14,23 +14,23 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
 import com.allay.photoeditor.model.AdjustmentState
+import com.allay.photoeditor.editor.filter.FilterController
 import com.allay.photoeditor.model.EditorElement
 import com.allay.photoeditor.model.FilterType
 import com.allay.photoeditor.model.TextElement
-import com.allay.photoeditor.processing.ImageAdjustmentProcessor
-import com.allay.photoeditor.processing.ImageFilterProcessor
-import kotlin.math.abs
+import com.allay.photoeditor.editor.adjustment.AdjustmentController
+import com.allay.photoeditor.editor.crop.CropController
+import com.allay.photoeditor.editor.drawing.EditorRenderer
+import com.allay.photoeditor.editor.transform.TransformController
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
-import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
+
+private typealias CropAspectRatio = CropController.AspectRatio
+private typealias CropHandle = CropController.Handle
 
 class PhotoEditorView @JvmOverloads constructor(
     context: Context,
@@ -62,9 +62,6 @@ class PhotoEditorView @JvmOverloads constructor(
         private const val HANDLE_TOUCH_RADIUS = 40f
 
         private const val ROTATION_HANDLE_DISTANCE = 70f
-        private const val HANDLE_RADIUS = 18f
-
-        private const val SELECTION_STROKE_WIDTH = 3f
 
         // ---------------------------------------------------------------------
         // CROP
@@ -115,6 +112,15 @@ class PhotoEditorView @JvmOverloads constructor(
         strokeCap = Paint.Cap.SQUARE
         color = Color.WHITE
     }
+
+    private val editorRenderer = EditorRenderer(
+        bitmapPaint = bitmapPaint,
+        cropOverlayPaint = cropOverlayPaint,
+        cropBorderPaint = cropBorderPaint,
+        cropGridPaint = cropGridPaint,
+        cropHandlePaint = cropHandlePaint,
+        cropHandleLength = CROP_HANDLE_LENGTH
+    )
 
     // =========================================================================
     // BITMAP
@@ -177,298 +183,111 @@ class PhotoEditorView @JvmOverloads constructor(
     // CROP MODE
     // =========================================================================
 
-    /**
-     * True when crop mode is active. Crop mode is intentionally separate
-     * from TransformMode because TransformMode is only for element transforms.
-     */
-    private var isCropMode = false
+    /** Owns the crop interaction state while PhotoEditorView keeps the existing behavior. */
+    private val cropController = CropController(
+        getBitmap = { bitmap },
+        getCropRectOnScreen = ::getCropRectOnScreen,
+        screenToImage = ::screenToImage,
+        captureSessionElements = ::createCropSessionElementsSnapshot,
+        captureSelectedIndex = ::getSelectedElementIndexForCropSession,
+        invalidate = ::invalidate,
+        onModeChanged = { active -> onCropModeChanged?.invoke(active) }
+    )
+
+    private var cropModeActive: Boolean
+        get() = cropController.isActive
+        set(value) = cropController.setActiveState(value)
 
     /** Crop selection stored in original image coordinates. */
-    private var cropRectImage: RectF? = null
-
-    /**
-     * Crop sizing mode.
-     *
-     * FREE allows each corner to move independently.
-     * Aspect-ratio modes will be added in the following crop phases.
-     */
-    private enum class CropAspectRatio {
-        FREE,
-        ONE_TO_ONE,
-        FOUR_TO_THREE,
-        SIXTEEN_TO_NINE,
-        ORIGINAL_RATIO
-    }
+    private var cropRectImage: RectF?
+        get() = cropController.currentCropRect
+        set(value) = cropController.setCropRectState(value)
 
     /** Current crop sizing mode. Free Crop is the default. */
-    private var cropAspectRatio = CropAspectRatio.FREE
+    private var cropAspectRatio: CropAspectRatio
+        get() = cropController.currentAspectRatio
+        set(value) = cropController.setAspectRatioState(value)
 
-    private enum class CropHandle {
-        NONE,
-        MOVE,
-        TOP_LEFT,
-        TOP_RIGHT,
-        BOTTOM_LEFT,
-        BOTTOM_RIGHT
-    }
-
-    private var activeCropHandle = CropHandle.NONE
-
-    // ---------------------------------------------------------------------
-    // CROP SESSION SNAPSHOT
-    // ---------------------------------------------------------------------
-
-    /**
-     * State captured when crop mode starts. Cancel Crop restores this state
-     * without affecting any edits that existed before the crop session.
-     */
-    private var cropOriginalBitmap: Bitmap? = null
-    private var cropOriginalElements: List<EditorElement>? = null
-    private var cropOriginalSelectedElement: EditorElement? = null
-
-    // ---------------------------------------------------------------------
-    // ROTATION SESSION SNAPSHOT
-    // ---------------------------------------------------------------------
-
-    /** State captured when rotation mode starts for Cancel Rotation. */
-    private var rotationOriginalBitmap: Bitmap? = null
-    private var rotationOriginalElements: List<EditorElement>? = null
-    private var rotationOriginalSelectedElement: EditorElement? = null
-    private var rotationOriginalScaleFactor = MIN_SCALE
-    private var rotationOriginalTranslationX = 0f
-    private var rotationOriginalTranslationY = 0f
-    private var isRotationMode = false
+    private var activeCropHandle: CropHandle
+        get() = cropController.currentHandle
+        set(value) = cropController.setActiveHandleState(value)
 
     // =========================================================================
     // FILTER MODE - PHASE 7.2
     // =========================================================================
 
+    /** Owns the temporary transform session. */
+    private val transformController = TransformController(
+        getBitmap = { bitmap },
+        captureElements = {
+            elements.map { element ->
+                when (element) {
+                    is TextElement -> element.copyForCropSession()
+                    else -> element
+                }
+            }
+        },
+        getSelectedElementIndex = { selectedElement?.let(elements::indexOf) ?: -1 },
+        getScaleFactor = { scaleFactor },
+        getTranslationX = { translationX },
+        getTranslationY = { translationY },
+        resetGestureState = ::resetGestureState,
+        onModeChanged = { active -> onRotationModeChanged?.invoke(active) },
+        invalidate = ::invalidate
+    )
+
+    private val rotationModeActive: Boolean
+        get() = transformController.isActive
+
+    /** Owns the temporary filter-selection session. */
+    private val filterController = FilterController(
+        getCurrentBitmap = { bitmap },
+        setCurrentBitmap = { bitmap = it },
+        canEnter = {
+            !cropModeActive &&
+                    !rotationModeActive &&
+                    !adjustmentModeActive
+        },
+        resetGestureState = ::resetGestureState,
+        onModeChanged = { active -> onFilterModeChanged?.invoke(active) },
+        invalidate = ::invalidate
+    )
+
+    private val filterModeActive: Boolean
+        get() = filterController.isActive
+
+    private val filterPreviewBitmap: Bitmap?
+        get() = filterController.currentPreviewBitmap
+
     fun enterFilterMode() {
-        if (isFilterMode || isCropMode || isRotationMode || isAdjustmentMode) {
-            Log.d(TAG, "Filter mode ignored: another editor mode is active")
-            return
-        }
-
-        val currentBitmap = bitmap
-        if (currentBitmap == null) {
-            Log.d(TAG, "Filter mode ignored: no image selected")
-            return
-        }
-
-        filterOriginalBitmap = currentBitmap
-        filterPreviewBitmap = currentBitmap
-        filterType = FilterType.ORIGINAL
-        isFilterMode = true
-
-        resetGestureState()
-        onFilterModeChanged?.invoke(true)
-        invalidate()
-
-        Log.d(
-            TAG,
-            "Filter session started: bitmap=${currentBitmap.width}x${currentBitmap.height}"
-        )
+        filterController.enter()
     }
 
-    fun isFilterMode(): Boolean = isFilterMode
+    fun isFilterMode(): Boolean = filterController.isActive
+
+
 
     /** Returns the filter currently selected in the temporary session. */
-    fun getFilterType(): FilterType = filterType
+    fun getFilterType(): FilterType = filterController.currentFilterType
 
-    /** Applies a filter to the session source bitmap and refreshes the preview. */
+    /** Applies a filter to the temporary session and refreshes the preview. */
     fun setFilter(type: FilterType) {
-        if (!isFilterMode) {
-            Log.d(TAG, "Filter ignored: filter mode is not active")
-            return
-        }
-
-        val source = filterOriginalBitmap ?: bitmap
-        if (source == null) {
-            Log.w(TAG, "Filter ignored: source bitmap is missing")
-            return
-        }
-
-        if (type == filterType && filterPreviewBitmap != null) {
-            return
-        }
-
-        val previousPreview = filterPreviewBitmap
-        val preview = ImageFilterProcessor.process(
-            source = source,
-            filter = type
-        )
-
-        if (
-            previousPreview != null &&
-            previousPreview !== source &&
-            previousPreview !== preview &&
-            !previousPreview.isRecycled
-        ) {
-            previousPreview.recycle()
-        }
-
-        filterType = type
-        filterPreviewBitmap = preview
-        invalidate()
-
-        Log.d(TAG, "Filter selected: $type")
+        filterController.selectFilter(type)
     }
 
     /** Commits the current filter preview to the editor bitmap. */
     fun applyFilter() {
-        if (!isFilterMode) {
-            Log.d(TAG, "Apply filter ignored: filter mode is not active")
-            return
-        }
-
-        val appliedBitmap = filterPreviewBitmap ?: filterOriginalBitmap ?: bitmap
-        val originalBitmap = filterOriginalBitmap
-        val previewBitmap = filterPreviewBitmap
-        val appliedFilter = filterType
-
-        if (appliedBitmap == null) {
-            cancelFilterMode()
-            return
-        }
-
-        bitmap = appliedBitmap
-
-        if (
-            previewBitmap != null &&
-            previewBitmap !== appliedBitmap &&
-            previewBitmap !== originalBitmap &&
-            !previewBitmap.isRecycled
-        ) {
-            previewBitmap.recycle()
-        }
-
-        filterOriginalBitmap = null
-        filterPreviewBitmap = null
-        filterType = FilterType.ORIGINAL
-        isFilterMode = false
-
-        resetGestureState()
-        onFilterModeChanged?.invoke(false)
-        invalidate()
-
-        Log.d(TAG, "Filter applied: $appliedFilter")
+        filterController.apply()
     }
 
     /** Discards the temporary filter preview and restores the session source. */
     fun cancelFilterMode() {
-        if (!isFilterMode) return
-
-        val originalBitmap = filterOriginalBitmap
-        val previewBitmap = filterPreviewBitmap
-
-        if (originalBitmap != null) {
-            bitmap = originalBitmap
-        }
-
-        if (
-            previewBitmap != null &&
-            previewBitmap !== originalBitmap &&
-            !previewBitmap.isRecycled
-        ) {
-            previewBitmap.recycle()
-        }
-
-        filterOriginalBitmap = null
-        filterPreviewBitmap = null
-        filterType = FilterType.ORIGINAL
-        isFilterMode = false
-
-        resetGestureState()
-        onFilterModeChanged?.invoke(false)
-        invalidate()
-        Log.d(TAG, "Filter session cancelled")
-    }
-
-    /** Clears only temporary filter-session state. */
-    private fun clearFilterSession() {
-        val originalBitmap = filterOriginalBitmap
-        val previewBitmap = filterPreviewBitmap
-
-        if (
-            previewBitmap != null &&
-            previewBitmap !== originalBitmap &&
-            !previewBitmap.isRecycled
-        ) {
-            previewBitmap.recycle()
-        }
-
-        filterOriginalBitmap = null
-        filterPreviewBitmap = null
-        filterType = FilterType.ORIGINAL
-        isFilterMode = false
+        filterController.cancel()
     }
 
     // =========================================================================
-    // ADJUSTMENT SESSION - PHASE 7.1
+    // FILTER / ADJUSTMENT MODE
     // =========================================================================
-
-    /** True while the temporary adjustment session is active. */
-    private var isAdjustmentMode = false
-
-    /** True while the temporary filter session is active. */
-    private var isFilterMode = false
-
-    /** Bitmap captured when Filter Mode starts. */
-    private var filterOriginalBitmap: Bitmap? = null
-
-    /** Bitmap currently displayed during Filter Mode. */
-    private var filterPreviewBitmap: Bitmap? = null
-
-    /** Currently selected filter. */
-    private var filterType = FilterType.ORIGINAL
-
-    /** Bitmap captured when Adjustment Mode starts. */
-    private var adjustmentOriginalBitmap: Bitmap? = null
-
-    /** Current non-destructive adjustment values. */
-    private var adjustmentState = AdjustmentState()
-
-    /** Bitmap currently displayed during Adjustment Mode. */
-    private var adjustmentPreviewBitmap: Bitmap? = null
-
-    /**
-     * Background worker used for adjustment preview generation.
-     *
-     * Adjustment processing can be expensive for large images, so it must not
-     * run on the main/UI thread while the user is dragging a SeekBar.
-     */
-    private var adjustmentPreviewExecutor: ExecutorService? = null
-
-    /** Identifies the newest adjustment preview request. */
-    @Volatile
-    private var adjustmentPreviewGeneration = 0L
-
-    /** Most recently processed adjustment state. */
-    private var lastProcessedAdjustmentState: AdjustmentState? = null
-
-    /** True when Apply was requested while the newest preview is still processing. */
-    private var pendingAdjustmentApply = false
-
-    /**
-     * Holds only the newest preview request. Intermediate slider states are
-     * replaced instead of being queued, preventing processing backlog during
-     * rapid SeekBar movement.
-     */
-    private val pendingAdjustmentPreview =
-        AtomicReference<AdjustmentPreviewRequest?>(null)
-
-    /** Ensures only one preview worker is active at a time. */
-    private val adjustmentPreviewWorkerRunning =
-        AtomicBoolean(false)
-
-    private data class AdjustmentPreviewRequest(
-        val source: Bitmap,
-        val state: AdjustmentState,
-        val generation: Long
-    )
-
-    /** Last touch position in original image coordinates while moving the crop. */
-    private val lastCropTouchImage = PointF()
 
     private var initialRotation = 0f
 
@@ -523,6 +342,18 @@ class PhotoEditorView @JvmOverloads constructor(
     var onFilterModeChanged:
             ((Boolean) -> Unit)? = null
 
+    /** Owns temporary adjustment state and background preview processing. */
+    private val adjustmentController = AdjustmentController(
+        getSourceBitmap = { bitmap },
+        setCommittedBitmap = { bitmap = it },
+        resetGestureState = ::resetGestureState,
+        onModeChanged = { active -> onAdjustmentModeChanged?.invoke(active) },
+        invalidate = ::invalidate
+    )
+
+    private val adjustmentModeActive: Boolean
+        get() = adjustmentController.isActive
+
     // =========================================================================
     // MATRICES
     // =========================================================================
@@ -550,7 +381,7 @@ class PhotoEditorView @JvmOverloads constructor(
                      */
                     if (
                         transformMode != TransformMode.NONE ||
-                        isCropMode
+                        cropModeActive
                     ) {
                         return false
                     }
@@ -593,7 +424,7 @@ class PhotoEditorView @JvmOverloads constructor(
                     e: MotionEvent
                 ): Boolean {
 
-                    if (isCropMode) {
+                    if (cropModeActive) {
                         Log.d(TAG, "Double tap ignored: crop mode active")
                         return true
                     }
@@ -698,13 +529,12 @@ class PhotoEditorView @JvmOverloads constructor(
         selectedElement = null
 
         transformMode = TransformMode.NONE
-        isCropMode = false
+        cropModeActive = false
         cropRectImage = null
-        clearCropSessionSnapshot()
-        clearRotationSessionSnapshot()
-        isRotationMode = false
-        clearFilterSession()
-        clearAdjustmentSession()
+        cropController.clearSession()
+        transformController.clearSession()
+        filterController.clear()
+        adjustmentController.clearSession()
 
         notifySelectionChanged()
         onCropModeChanged?.invoke(false)
@@ -728,12 +558,11 @@ class PhotoEditorView @JvmOverloads constructor(
         resetTransform()
 
         transformMode = TransformMode.NONE
-        isCropMode = false
+        cropModeActive = false
         activeCropHandle = CropHandle.NONE
-        clearCropSessionSnapshot()
-        clearRotationSessionSnapshot()
-        isRotationMode = false
-        clearAdjustmentSession()
+        cropController.clearSession()
+        transformController.clearSession()
+        adjustmentController.clearSession()
 
         notifySelectionChanged()
         onCropModeChanged?.invoke(false)
@@ -765,8 +594,8 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     fun flipHorizontal() {
 
-        if (isCropMode || isRotationMode) {
-            Log.d(TAG, "Horizontal flip ignored: another editor mode is active")
+        if (cropModeActive) {
+            Log.d(TAG, "Horizontal flip ignored: crop mode is active")
             return
         }
 
@@ -790,7 +619,7 @@ class PhotoEditorView @JvmOverloads constructor(
             return
         }
 
-        beginRotationSessionIfNeeded()
+        beginTransformSession()
 
         try {
             // Draw into a new bitmap using a canvas centered on the image.
@@ -898,175 +727,22 @@ class PhotoEditorView @JvmOverloads constructor(
     }
 
     /**
-     * Draws the crop selection.
-     * Corner resizing was added in Phase 5.3.
-     * Moving the complete crop area was added in Phase 5.4.
+     * Draws the crop overlay. Geometry is calculated here; visual rendering is
+     * delegated to EditorRenderer.
      */
     private fun drawCropSelection(canvas: Canvas) {
         val cropRect = getCropRectOnScreen() ?: return
         val currentBitmap = bitmap ?: return
 
-        // Darken the complete editor.
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), cropOverlayPaint)
-
-        // Redraw only the selected area so it remains clear.
-        //
-        // IMPORTANT:
-        // The editor elements (for example TextElement) are part of the
-        // editor composition and must also be redrawn inside the crop area.
-        // Previously only the bitmap was redrawn here, so entering crop mode
-        // visually covered all text/elements with the overlay.
-        canvas.save()
-        canvas.clipRect(cropRect)
-
-        // Redraw the image.
-        canvas.drawBitmap(
-            currentBitmap,
-            imageToScreenMatrix,
-            bitmapPaint
+        editorRenderer.drawCropOverlay(
+            canvas = canvas,
+            cropRect = cropRect,
+            viewWidth = width.toFloat(),
+            viewHeight = height.toFloat(),
+            bitmap = currentBitmap,
+            imageToScreenMatrix = imageToScreenMatrix,
+            elements = elements
         )
-
-        // Redraw all editor elements above the image.
-        // This keeps text, stickers, shapes, etc. visible while cropping.
-        elements.forEach { element ->
-            element.draw(
-                canvas,
-                imageToScreenMatrix
-            )
-        }
-
-        canvas.restore()
-
-        // Rule-of-thirds grid.
-        drawCropGrid(canvas, cropRect)
-
-        // Selection border.
-        canvas.drawRect(cropRect, cropBorderPaint)
-
-        val handleLength = CROP_HANDLE_LENGTH
-
-        // Draw the corner brackets slightly inward from each corner. The
-        // actual touch target is larger than the visible bracket and is
-        // handled by findCropHandle().
-        //
-        // Top-left.
-        canvas.drawLine(
-            cropRect.left,
-            cropRect.top,
-            cropRect.left + handleLength,
-            cropRect.top,
-            cropHandlePaint
-        )
-        canvas.drawLine(
-            cropRect.left,
-            cropRect.top,
-            cropRect.left,
-            cropRect.top + handleLength,
-            cropHandlePaint
-        )
-
-        // Top-right.
-        canvas.drawLine(
-            cropRect.right,
-            cropRect.top,
-            cropRect.right - handleLength,
-            cropRect.top,
-            cropHandlePaint
-        )
-        canvas.drawLine(
-            cropRect.right,
-            cropRect.top,
-            cropRect.right,
-            cropRect.top + handleLength,
-            cropHandlePaint
-        )
-
-        // Bottom-left.
-        canvas.drawLine(
-            cropRect.left,
-            cropRect.bottom,
-            cropRect.left + handleLength,
-            cropRect.bottom,
-            cropHandlePaint
-        )
-        canvas.drawLine(
-            cropRect.left,
-            cropRect.bottom,
-            cropRect.left,
-            cropRect.bottom - handleLength,
-            cropHandlePaint
-        )
-
-        // Bottom-right.
-        canvas.drawLine(
-            cropRect.right,
-            cropRect.bottom,
-            cropRect.right - handleLength,
-            cropRect.bottom,
-            cropHandlePaint
-        )
-        canvas.drawLine(
-            cropRect.right,
-            cropRect.bottom,
-            cropRect.right,
-            cropRect.bottom - handleLength,
-            cropHandlePaint
-        )
-    }
-
-
-    /**
-     * Draws a rule-of-thirds grid inside the current crop selection.
-     * The grid is clipped to the crop rectangle so it never extends outside
-     * the active crop area.
-     */
-    private fun drawCropGrid(
-        canvas: Canvas,
-        cropRect: RectF
-    ) {
-        val verticalOneThird =
-            cropRect.left + cropRect.width() / 3f
-        val verticalTwoThirds =
-            cropRect.left + cropRect.width() * 2f / 3f
-
-        val horizontalOneThird =
-            cropRect.top + cropRect.height() / 3f
-        val horizontalTwoThirds =
-            cropRect.top + cropRect.height() * 2f / 3f
-
-        canvas.save()
-        canvas.clipRect(cropRect)
-
-        canvas.drawLine(
-            verticalOneThird,
-            cropRect.top,
-            verticalOneThird,
-            cropRect.bottom,
-            cropGridPaint
-        )
-        canvas.drawLine(
-            verticalTwoThirds,
-            cropRect.top,
-            verticalTwoThirds,
-            cropRect.bottom,
-            cropGridPaint
-        )
-        canvas.drawLine(
-            cropRect.left,
-            horizontalOneThird,
-            cropRect.right,
-            horizontalOneThird,
-            cropGridPaint
-        )
-        canvas.drawLine(
-            cropRect.left,
-            horizontalTwoThirds,
-            cropRect.right,
-            horizontalTwoThirds,
-            cropGridPaint
-        )
-
-        canvas.restore()
     }
 
     // =========================================================================
@@ -1081,7 +757,7 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     fun enterCropMode() {
 
-        if (isRotationMode) {
+        if (rotationModeActive) {
             Log.d(TAG, "Cannot enter crop mode while rotation mode is active")
             return
         }
@@ -1098,7 +774,7 @@ class PhotoEditorView @JvmOverloads constructor(
 
         // Capture the complete editor state before changing selection state.
         // This snapshot is used by Cancel Crop.
-        createCropSessionSnapshot()
+        cropController.beginSession()
 
         // Deselect any active editor element while crop mode is active.
         selectedElement?.isSelected = false
@@ -1116,7 +792,7 @@ class PhotoEditorView @JvmOverloads constructor(
         initializeCropRect()
 
         // Activate crop mode.
-        isCropMode = true
+        cropModeActive = true
 
         Log.d(
             TAG,
@@ -1153,7 +829,7 @@ class PhotoEditorView @JvmOverloads constructor(
             return
         }
 
-        if (!isCropMode || cropRect == null) {
+        if (!cropModeActive || cropRect == null) {
             Log.w(
                 TAG,
                 "Cannot apply crop. Crop mode is not active."
@@ -1268,9 +944,9 @@ class PhotoEditorView @JvmOverloads constructor(
 
         cropRectImage = null
         cropAspectRatio = CropAspectRatio.FREE
-        isCropMode = false
+        cropModeActive = false
 
-        clearCropSessionSnapshot()
+        cropController.clearSession()
 
         resetTransform()
 
@@ -1297,7 +973,7 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     fun resetCrop() {
 
-        if (!isCropMode) {
+        if (!cropModeActive) {
             Log.d(
                 TAG,
                 "Reset crop ignored: crop mode is not active"
@@ -1347,7 +1023,7 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     fun cancelCrop() {
 
-        if (!isCropMode) {
+        if (!cropModeActive) {
             Log.d(
                 TAG,
                 "Cancel crop ignored: crop mode is not active"
@@ -1355,10 +1031,9 @@ class PhotoEditorView @JvmOverloads constructor(
             return
         }
 
-        val originalBitmap = cropOriginalBitmap
-        val originalElements = cropOriginalElements
+        val session = cropController.getSessionSnapshot()
 
-        if (originalBitmap == null || originalElements == null) {
+        if (session == null) {
             Log.w(
                 TAG,
                 "Cancel crop failed: crop session snapshot is missing"
@@ -1368,12 +1043,12 @@ class PhotoEditorView @JvmOverloads constructor(
             return
         }
 
-        bitmap = originalBitmap
+        bitmap = session.bitmap
 
         elements.clear()
-        elements.addAll(originalElements)
+        elements.addAll(session.elements)
 
-        selectedElement = cropOriginalSelectedElement
+        selectedElement = session.elements.getOrNull(session.selectedIndex)
 
         // Re-apply selection state exactly as it was before crop mode.
         elements.forEach { element ->
@@ -1382,14 +1057,14 @@ class PhotoEditorView @JvmOverloads constructor(
 
         cropRectImage = null
         cropAspectRatio = CropAspectRatio.FREE
-        isCropMode = false
+        cropModeActive = false
 
         transformMode = TransformMode.NONE
         isMovingElement = false
         isDragging = false
         activeCropHandle = CropHandle.NONE
 
-        clearCropSessionSnapshot()
+        cropController.clearSession()
         resetTransform()
 
         notifySelectionChanged()
@@ -1398,7 +1073,7 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d(
             TAG,
             "Crop cancelled. Original image restored: " +
-                    "${originalBitmap.width}x${originalBitmap.height}, " +
+                    "${session.bitmap?.width}x${session.bitmap?.height}, " +
                     "elements=${elements.size}"
         )
 
@@ -1419,14 +1094,14 @@ class PhotoEditorView @JvmOverloads constructor(
     private fun exitCropModeWithoutRestore() {
         cropRectImage = null
         cropAspectRatio = CropAspectRatio.FREE
-        isCropMode = false
+        cropModeActive = false
 
         transformMode = TransformMode.NONE
         isMovingElement = false
         isDragging = false
         activeCropHandle = CropHandle.NONE
 
-        clearCropSessionSnapshot()
+        cropController.clearSession()
 
         notifySelectionChanged()
         onCropModeChanged?.invoke(false)
@@ -1434,55 +1109,22 @@ class PhotoEditorView @JvmOverloads constructor(
     }
 
     /**
-     * Captures the editor state before crop mode changes anything.
+     * Creates the element copies required by the CropController session
+     * snapshot. The controller owns the snapshot lifecycle; the View owns
+     * knowledge of how editor elements are copied.
      */
-    private fun createCropSessionSnapshot() {
-        cropOriginalBitmap = bitmap
-
-        val selected = selectedElement
-        val snapshots = elements.map { element ->
+    private fun createCropSessionElementsSnapshot(): List<EditorElement> {
+        return elements.map { element ->
             when (element) {
                 is TextElement -> element.copyForCropSession()
                 else -> element
             }
         }
-
-        cropOriginalElements = snapshots
-
-        cropOriginalSelectedElement = when (selected) {
-            is TextElement -> snapshots
-                .firstOrNull {
-                    it is TextElement &&
-                            it.text == selected.text &&
-                            it.getBounds() == selected.getBounds()
-                }
-            else -> null
-        }
-
-        // The selection object lookup above can be ambiguous for identical
-        // text elements. Resolve by list index for the current editor model.
-        if (selected != null) {
-            val selectedIndex = elements.indexOf(selected)
-            if (selectedIndex >= 0) {
-                cropOriginalSelectedElement =
-                    snapshots.getOrNull(selectedIndex)
-            }
-        }
-
-        Log.d(
-            TAG,
-            "Crop session snapshot created: " +
-                    "bitmap=${bitmap?.width}x${bitmap?.height}, " +
-                    "elements=${snapshots.size}, " +
-                    "selectedIndex=${elements.indexOf(selected)}"
-        )
     }
 
-    /** Clears the crop-session snapshot after Apply or Cancel. */
-    private fun clearCropSessionSnapshot() {
-        cropOriginalBitmap = null
-        cropOriginalElements = null
-        cropOriginalSelectedElement = null
+    /** Returns the selected element index for the current Crop session. */
+    private fun getSelectedElementIndexForCropSession(): Int {
+        return elements.indexOf(selectedElement)
     }
 
     /**
@@ -1490,7 +1132,7 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     fun isCropMode(): Boolean {
 
-        return isCropMode
+        return cropModeActive
     }
 
     /**
@@ -1508,7 +1150,7 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     fun rotateCrop90Degrees() {
 
-        if (!isCropMode) {
+        if (!cropModeActive) {
             Log.d(
                 TAG,
                 "Rotate crop ignored: crop mode is not active"
@@ -1592,26 +1234,20 @@ class PhotoEditorView @JvmOverloads constructor(
                 CropAspectRatio.FREE -> Unit
 
                 CropAspectRatio.ONE_TO_ONE -> {
-                    normalizeCropToOneToOne()
+                    cropController.normalizeToAspectRatio(1f)
                 }
 
                 CropAspectRatio.FOUR_TO_THREE -> {
-                    normalizeCropToAspectRatio(
-                        aspectRatio = 4f / 3f
-                    )
+                    cropController.normalizeToAspectRatio(4f / 3f)
                 }
 
                 CropAspectRatio.SIXTEEN_TO_NINE -> {
-                    normalizeCropToAspectRatio(
-                        aspectRatio = 16f / 9f
-                    )
+                    cropController.normalizeToAspectRatio(16f / 9f)
                 }
 
                 CropAspectRatio.ORIGINAL_RATIO -> {
-                    normalizeCropToAspectRatio(
-                        aspectRatio =
-                            rotatedBitmap.width.toFloat() /
-                                    rotatedBitmap.height.toFloat()
+                    cropController.normalizeToAspectRatio(
+                        rotatedBitmap.width.toFloat() / rotatedBitmap.height.toFloat()
                     )
                 }
             }
@@ -1648,327 +1284,43 @@ class PhotoEditorView @JvmOverloads constructor(
     }
 
     // =========================================================================
-    // ADJUSTMENT SESSION - PHASE 7.1
+    // ADJUSTMENT SESSION - PHASE 7
     // =========================================================================
 
-    /**
-     * Starts a temporary non-destructive adjustment session.
-     *
-     * The committed bitmap remains untouched until Apply is pressed.
-     */
+    /** Starts a temporary non-destructive adjustment session. */
     fun enterAdjustmentMode() {
-
-        if (isAdjustmentMode) {
-            Log.d(TAG, "Adjustment mode ignored: already active")
-            return
-        }
-
-        if (isCropMode || isRotationMode) {
+        if (cropModeActive || rotationModeActive || filterModeActive) {
             Log.d(TAG, "Adjustment mode ignored: another editor mode is active")
             return
         }
 
-        val currentBitmap = bitmap
-
-        if (currentBitmap == null) {
-            Log.d(TAG, "Adjustment mode ignored: no image selected")
-            return
-        }
-
-        adjustmentPreviewGeneration++
-        pendingAdjustmentApply = false
-        lastProcessedAdjustmentState = AdjustmentState()
-
-        adjustmentOriginalBitmap = currentBitmap
-        adjustmentState = AdjustmentState()
-        adjustmentPreviewBitmap = currentBitmap
-        isAdjustmentMode = true
-
-        resetGestureState()
-        onAdjustmentModeChanged?.invoke(true)
-        invalidate()
-
-        Log.d(
-            TAG,
-            "Adjustment session started: " +
-                    "bitmap=${currentBitmap.width}x${currentBitmap.height}"
-        )
+        adjustmentController.enter()
     }
 
     /** Returns true when the temporary adjustment session is active. */
-    fun isAdjustmentMode(): Boolean = isAdjustmentMode
+    fun isAdjustmentMode(): Boolean = adjustmentController.isActive
 
     /** Returns the current adjustment values. */
-    fun getAdjustmentState(): AdjustmentState = adjustmentState
+    fun getAdjustmentState(): AdjustmentState = adjustmentController.currentState
 
-    /**
-     * Updates the temporary adjustment state and schedules a preview refresh.
-     *
-     * Phase 7.8: preview processing is moved off the main/UI thread.
-     * Rapid slider updates are represented by generations so an older, slower
-     * processing request can never overwrite the newest preview.
-     */
+    /** Updates the temporary adjustment state and refreshes its preview. */
     fun setAdjustmentState(state: AdjustmentState) {
-
-        if (!isAdjustmentMode) {
-            Log.d(TAG, "Adjustment state ignored: adjustment mode is not active")
-            return
-        }
-
-        val source = adjustmentOriginalBitmap ?: bitmap ?: return
-
-        if (state == adjustmentState) {
-            return
-        }
-
-        adjustmentState = state
-        pendingAdjustmentApply = false
-
-        val generation = ++adjustmentPreviewGeneration
-
-        if (state == AdjustmentState()) {
-            pendingAdjustmentPreview.set(null)
-
-            val previousPreview = adjustmentPreviewBitmap
-
-            adjustmentPreviewBitmap = source
-            lastProcessedAdjustmentState = state
-
-            if (
-                previousPreview != null &&
-                previousPreview !== source &&
-                !previousPreview.isRecycled
-            ) {
-                previousPreview.recycle()
-            }
-
-            invalidate()
-            Log.d(TAG, "Adjustment preview reset to original")
-            return
-        }
-
-        pendingAdjustmentPreview.set(
-            AdjustmentPreviewRequest(
-                source = source,
-                state = state,
-                generation = generation
-            )
-        )
-
-        startAdjustmentPreviewWorkerIfNeeded()
-
-        Log.d(
-            TAG,
-            "Adjustment preview scheduled: generation=$generation, state=$state"
-        )
-    }
-
-    /** Starts one worker when there is no worker already processing previews. */
-    private fun startAdjustmentPreviewWorkerIfNeeded() {
-        if (!adjustmentPreviewWorkerRunning.compareAndSet(false, true)) {
-            return
-        }
-
-        getAdjustmentPreviewExecutor().execute {
-            processPendingAdjustmentPreviews()
-        }
-    }
-
-    /**
-     * Processes only the newest pending request.
-     *
-     * If the user moves the slider again while processing is in progress, the
-     * pending request is replaced. This prevents a long queue of obsolete
-     * preview calculations.
-     */
-    private fun processPendingAdjustmentPreviews() {
-        while (true) {
-            val request = pendingAdjustmentPreview.getAndSet(null)
-                ?: break
-
-            val preview = try {
-                ImageAdjustmentProcessor.process(
-                    source = request.source,
-                    state = request.state
-                )
-            } catch (exception: Exception) {
-                Log.e(
-                    TAG,
-                    "Adjustment preview processing failed",
-                    exception
-                )
-                continue
-            }
-
-            post {
-                if (
-                    !isAdjustmentMode ||
-                    request.generation != adjustmentPreviewGeneration
-                ) {
-                    if (
-                        preview !== request.source &&
-                        !preview.isRecycled
-                    ) {
-                        preview.recycle()
-                    }
-                    return@post
-                }
-
-                val previousPreview = adjustmentPreviewBitmap
-
-                adjustmentPreviewBitmap = preview
-                lastProcessedAdjustmentState = request.state
-
-                if (
-                    previousPreview != null &&
-                    previousPreview !== request.source &&
-                    previousPreview !== preview &&
-                    !previousPreview.isRecycled
-                ) {
-                    previousPreview.recycle()
-                }
-
-                invalidate()
-
-                Log.d(
-                    TAG,
-                    "Adjustment preview updated: state=${request.state}"
-                )
-
-                if (
-                    pendingAdjustmentApply &&
-                    lastProcessedAdjustmentState == adjustmentState
-                ) {
-                    pendingAdjustmentApply = false
-                    applyAdjustmentsInternal()
-                }
-            }
-        }
-
-        adjustmentPreviewWorkerRunning.set(false)
-
-        // A new request may have arrived between the last getAndSet() and
-        // clearing the running flag. Start another worker if needed.
-        if (pendingAdjustmentPreview.get() != null) {
-            startAdjustmentPreviewWorkerIfNeeded()
-        }
-    }
-
-    /** Creates the single background worker lazily. */
-    private fun getAdjustmentPreviewExecutor(): ExecutorService {
-        return adjustmentPreviewExecutor ?: Executors.newSingleThreadExecutor { runnable ->
-            Thread(
-                runnable,
-                "PhotoEditor-AdjustmentPreview"
-            ).apply {
-                isDaemon = true
-            }
-        }.also { executor ->
-            adjustmentPreviewExecutor = executor
-        }
+        adjustmentController.setState(state)
     }
 
     /** Resets temporary adjustment values while keeping the session active. */
     fun resetAdjustments() {
-
-        if (!isAdjustmentMode) {
-            Log.d(TAG, "Reset adjustments ignored: adjustment mode is not active")
-            return
-        }
-
-        adjustmentPreviewGeneration++
-        pendingAdjustmentApply = false
-        pendingAdjustmentPreview.set(null)
-
-        val originalBitmap = adjustmentOriginalBitmap
-        val previousPreview = adjustmentPreviewBitmap
-
-        adjustmentState = AdjustmentState()
-        adjustmentPreviewBitmap = originalBitmap
-        lastProcessedAdjustmentState = AdjustmentState()
-
-        if (
-            previousPreview != null &&
-            previousPreview !== originalBitmap &&
-            !previousPreview.isRecycled
-        ) {
-            previousPreview.recycle()
-        }
-
-        invalidate()
-
-        Log.d(TAG, "Adjustments reset")
+        adjustmentController.reset()
     }
 
     /** Commits the current adjustment preview. */
     fun applyAdjustments() {
-
-        if (!isAdjustmentMode) {
-            Log.d(TAG, "Apply adjustments ignored: adjustment mode is not active")
-            return
-        }
-
-        if (lastProcessedAdjustmentState != adjustmentState) {
-            pendingAdjustmentApply = true
-            Log.d(
-                TAG,
-                "Apply queued: waiting for latest adjustment preview"
-            )
-            return
-        }
-
-        applyAdjustmentsInternal()
+        adjustmentController.apply()
     }
 
-    /** Commits an adjustment preview after its latest processing is complete. */
-    private fun applyAdjustmentsInternal() {
-        if (!isAdjustmentMode) {
-            return
-        }
-
-        adjustmentPreviewBitmap?.let { bitmap = it }
-
-        clearAdjustmentSession()
-        resetGestureState()
-        onAdjustmentModeChanged?.invoke(false)
-        invalidate()
-
-        Log.d(TAG, "Adjustments applied")
-    }
-
-    /** Discards the temporary preview and restores the session source bitmap. */
+    /** Discards the temporary adjustment preview. */
     fun cancelAdjustments() {
-
-        if (!isAdjustmentMode) {
-            Log.d(TAG, "Cancel adjustments ignored: adjustment mode is not active")
-            return
-        }
-
-        adjustmentPreviewGeneration++
-        pendingAdjustmentApply = false
-        pendingAdjustmentPreview.set(null)
-
-        adjustmentOriginalBitmap?.let { bitmap = it }
-
-        clearAdjustmentSession()
-        resetGestureState()
-        onAdjustmentModeChanged?.invoke(false)
-        invalidate()
-
-        Log.d(TAG, "Adjustments cancelled")
-    }
-
-    /** Clears only temporary adjustment-session state. */
-    private fun clearAdjustmentSession() {
-        adjustmentPreviewGeneration++
-        pendingAdjustmentApply = false
-        pendingAdjustmentPreview.set(null)
-
-        adjustmentOriginalBitmap = null
-        adjustmentPreviewBitmap = null
-        adjustmentState = AdjustmentState()
-        lastProcessedAdjustmentState = null
-        isAdjustmentMode = false
+        adjustmentController.cancel()
     }
 
     // =========================================================================
@@ -1981,7 +1333,7 @@ class PhotoEditorView @JvmOverloads constructor(
      * restores the complete editor state captured at entry.
      */
     fun enterTransformMode() {
-        if (isCropMode) {
+        if (cropModeActive) {
             Log.d(TAG, "Transform mode ignored: crop mode is active")
             return
         }
@@ -1991,119 +1343,68 @@ class PhotoEditorView @JvmOverloads constructor(
             return
         }
 
-        if (isRotationMode) {
+        if (rotationModeActive) {
             Log.d(TAG, "Transform mode ignored: already active")
             return
         }
 
-        beginRotationSessionIfNeeded()
+        beginTransformSession()
     }
 
-    fun isRotationMode(): Boolean = isRotationMode
+    fun isRotationMode(): Boolean = transformController.isActive
 
     /** Starts a temporary transform session and snapshots the complete editor state. */
-    private fun beginRotationSessionIfNeeded() {
-        if (isRotationMode || isCropMode) return
-
-        val currentBitmap = bitmap ?: return
-        val selected = selectedElement
-        val snapshots = elements.map { element ->
-            when (element) {
-                is TextElement -> element.copyForCropSession()
-                else -> element
-            }
-        }
-
-        rotationOriginalBitmap = currentBitmap
-        rotationOriginalElements = snapshots
-        val selectedIndex = elements.indexOf(selected)
-        rotationOriginalSelectedElement =
-            if (selectedIndex >= 0) snapshots.getOrNull(selectedIndex) else null
-        rotationOriginalScaleFactor = scaleFactor
-        rotationOriginalTranslationX = translationX
-        rotationOriginalTranslationY = translationY
-        isRotationMode = true
-
-        // Rotation preview owns the transform gesture state, but selection is
-        // intentionally preserved so Apply Rotation does not unexpectedly
-        // deselect the active editor element.
-        transformMode = TransformMode.NONE
-        isMovingElement = false
-        isDragging = false
-
-        onRotationModeChanged?.invoke(true)
-
-        Log.d(TAG, "Transform session started: bitmap=${currentBitmap.width}x${currentBitmap.height}, elements=${elements.size}")
+    private fun beginTransformSession() {
+        transformController.enter()
     }
 
     /** Commits the current transform preview. */
     fun applyRotation() {
-        if (!isRotationMode) {
-            Log.d(TAG, "Apply rotation ignored: rotation mode is not active")
+        if (!rotationModeActive) {
+            Log.d(TAG, "Apply rotation ignored: transform mode is not active")
             return
         }
 
-        clearRotationSessionSnapshot()
-        isRotationMode = false
-        resetGestureState()
-        onRotationModeChanged?.invoke(false)
-        invalidate()
+        transformController.apply()
         Log.d(TAG, "Transform applied")
     }
 
     /** Restores the exact editor state captured before transform preview began. */
     fun cancelRotation() {
-        if (!isRotationMode) {
-            Log.d(TAG, "Cancel rotation ignored: rotation mode is not active")
+        if (!rotationModeActive) {
+            Log.d(TAG, "Cancel rotation ignored: transform mode is not active")
             return
         }
 
-        val originalBitmap = rotationOriginalBitmap
-        val originalElements = rotationOriginalElements
+        val snapshot = transformController.cancel()
+            ?: return
 
-        if (originalBitmap == null || originalElements == null) {
-            Log.w(TAG, "Cancel rotation failed: rotation session snapshot is missing")
-            exitRotationModeWithoutRestore()
-            return
-        }
-
-        bitmap = originalBitmap
+        bitmap = snapshot.bitmap
         elements.clear()
-        elements.addAll(originalElements)
-        selectedElement = rotationOriginalSelectedElement
-        elements.forEach { it.isSelected = it === selectedElement }
+        elements.addAll(snapshot.elements)
+        selectedElement = snapshot.elements.getOrNull(snapshot.selectedElementIndex)
+        elements.forEach { element ->
+            element.isSelected = element === selectedElement
+        }
+        scaleFactor = snapshot.scaleFactor
+        translationX = snapshot.translationX
+        translationY = snapshot.translationY
 
-        scaleFactor = rotationOriginalScaleFactor
-        translationX = rotationOriginalTranslationX
-        translationY = rotationOriginalTranslationY
-        resetGestureState()
-
-        clearRotationSessionSnapshot()
-        isRotationMode = false
         notifySelectionChanged()
-        onRotationModeChanged?.invoke(false)
         invalidate()
 
-        Log.d(TAG, "Transform cancelled. Original image restored: ${originalBitmap.width}x${originalBitmap.height}")
+        Log.d(
+            TAG,
+            "Transform cancelled. Original image restored: " +
+                    "${snapshot.bitmap.width}x${snapshot.bitmap.height}"
+        )
     }
 
     private fun exitRotationModeWithoutRestore() {
-        clearRotationSessionSnapshot()
-        isRotationMode = false
-        transformMode = TransformMode.NONE
-        isMovingElement = false
-        isDragging = false
+        transformController.clearSession()
+        resetGestureState()
         onRotationModeChanged?.invoke(false)
         invalidate()
-    }
-
-    private fun clearRotationSessionSnapshot() {
-        rotationOriginalBitmap = null
-        rotationOriginalElements = null
-        rotationOriginalSelectedElement = null
-        rotationOriginalScaleFactor = MIN_SCALE
-        rotationOriginalTranslationX = 0f
-        rotationOriginalTranslationY = 0f
     }
 
     // =========================================================================
@@ -2123,7 +1424,7 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     fun rotateLeft90() {
 
-        if (isCropMode) {
+        if (cropModeActive) {
             Log.d(
                 TAG,
                 "Rotate left ignored: crop mode is active"
@@ -2149,7 +1450,7 @@ class PhotoEditorView @JvmOverloads constructor(
             return
         }
 
-        beginRotationSessionIfNeeded()
+        beginTransformSession()
 
         val oldWidth = currentBitmap.width.toFloat()
         val oldHeight = currentBitmap.height.toFloat()
@@ -2235,7 +1536,7 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     fun rotateRight90() {
 
-        if (isCropMode) {
+        if (cropModeActive) {
             Log.d(
                 TAG,
                 "Rotate right ignored: crop mode is active"
@@ -2261,7 +1562,7 @@ class PhotoEditorView @JvmOverloads constructor(
             return
         }
 
-        beginRotationSessionIfNeeded()
+        beginTransformSession()
 
         val oldHeight = currentBitmap.height.toFloat()
 
@@ -2355,8 +1656,8 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     fun flipVertical() {
 
-        if (isCropMode || isRotationMode) {
-            Log.d(TAG, "Vertical flip ignored: another editor mode is active")
+        if (cropModeActive) {
+            Log.d(TAG, "Vertical flip ignored: crop mode is active")
             return
         }
 
@@ -2380,7 +1681,7 @@ class PhotoEditorView @JvmOverloads constructor(
             return
         }
 
-        beginRotationSessionIfNeeded()
+        beginTransformSession()
 
         try {
             val flippedBitmap = Bitmap.createBitmap(
@@ -2573,7 +1874,7 @@ class PhotoEditorView @JvmOverloads constructor(
     fun setOneToOneCropMode() {
 
         cropAspectRatio = CropAspectRatio.ONE_TO_ONE
-        normalizeCropToOneToOne()
+        cropController.normalizeToAspectRatio(1f)
 
         Log.d(TAG, "1:1 Crop mode selected")
         invalidate()
@@ -2593,9 +1894,7 @@ class PhotoEditorView @JvmOverloads constructor(
     fun setFourToThreeCropMode() {
         cropAspectRatio = CropAspectRatio.FOUR_TO_THREE
 
-        normalizeCropToAspectRatio(
-            aspectRatio = 4f / 3f
-        )
+        cropController.normalizeToAspectRatio(4f / 3f)
 
         Log.d(
             TAG,
@@ -2618,9 +1917,7 @@ class PhotoEditorView @JvmOverloads constructor(
     fun setSixteenToNineCropMode() {
         cropAspectRatio = CropAspectRatio.SIXTEEN_TO_NINE
 
-        normalizeCropToAspectRatio(
-            aspectRatio = 16f / 9f
-        )
+        cropController.normalizeToAspectRatio(16f / 9f)
 
         Log.d(
             TAG,
@@ -2647,10 +1944,8 @@ class PhotoEditorView @JvmOverloads constructor(
 
         cropAspectRatio = CropAspectRatio.ORIGINAL_RATIO
 
-        normalizeCropToAspectRatio(
-            aspectRatio =
-                currentBitmap.width.toFloat() /
-                        currentBitmap.height.toFloat()
+        cropController.normalizeToAspectRatio(
+            currentBitmap.width.toFloat() / currentBitmap.height.toFloat()
         )
 
         Log.d(
@@ -3885,7 +3180,7 @@ class PhotoEditorView @JvmOverloads constructor(
 
     fun deleteSelectedElement() {
 
-        if (isRotationMode || isCropMode) {
+        if (rotationModeActive || cropModeActive) {
             Log.d(TAG, "Delete ignored: editor mode is active")
             return
         }
@@ -3971,8 +3266,8 @@ class PhotoEditorView @JvmOverloads constructor(
 
         val currentBitmap =
             when {
-                isAdjustmentMode -> adjustmentPreviewBitmap
-                isFilterMode -> filterPreviewBitmap
+                adjustmentModeActive -> adjustmentController.currentPreviewBitmap
+                filterModeActive -> filterPreviewBitmap
                 else -> bitmap
             } ?: return
 
@@ -3990,32 +3285,21 @@ class PhotoEditorView @JvmOverloads constructor(
         // DRAW IMAGE
         // ---------------------------------------------------------------------
 
-        canvas.save()
-
-        canvas.concat(
-            imageToScreenMatrix
+        editorRenderer.drawBitmap(
+            canvas = canvas,
+            bitmap = currentBitmap,
+            imageToScreenMatrix = imageToScreenMatrix
         )
-
-        canvas.drawBitmap(
-            currentBitmap,
-            0f,
-            0f,
-            bitmapPaint
-        )
-
-        canvas.restore()
 
         // ---------------------------------------------------------------------
         // DRAW ELEMENTS
         // ---------------------------------------------------------------------
 
-        elements.forEach { element ->
-
-            element.draw(
-                canvas,
-                imageToScreenMatrix
-            )
-        }
+        editorRenderer.drawElements(
+            canvas = canvas,
+            elements = elements,
+            imageToScreenMatrix = imageToScreenMatrix
+        )
 
         // ---------------------------------------------------------------------
         // DRAW SELECTION HANDLES
@@ -4029,13 +3313,43 @@ class PhotoEditorView @JvmOverloads constructor(
             selectedText.isSelected
         ) {
 
-            drawTextSelectionHandles(
-                canvas,
-                selectedText
+            val bounds = selectedText.getBounds()
+
+            val topLeft = transformElementPoint(
+                selectedText,
+                PointF(bounds.left, bounds.top)
+            )
+
+            val topRight = transformElementPoint(
+                selectedText,
+                PointF(bounds.right, bounds.top)
+            )
+
+            val bottomLeft = transformElementPoint(
+                selectedText,
+                PointF(bounds.left, bounds.bottom)
+            )
+
+            val bottomRight = transformElementPoint(
+                selectedText,
+                PointF(bounds.right, bounds.bottom)
+            )
+
+            val rotationHandle = getRotationHandlePosition(selectedText)
+            val resizeHandle = getResizeHandlePosition(selectedText)
+
+            editorRenderer.drawTextSelectionHandles(
+                canvas = canvas,
+                topLeft = topLeft,
+                topRight = topRight,
+                bottomLeft = bottomLeft,
+                bottomRight = bottomRight,
+                rotationHandle = rotationHandle,
+                resizeHandle = resizeHandle
             )
         }
 
-        if (isCropMode) {
+        if (cropModeActive) {
             drawCropSelection(canvas)
         }
     }
@@ -4044,923 +3358,13 @@ class PhotoEditorView @JvmOverloads constructor(
     // DRAW TEXT HANDLES
     // =========================================================================
 
-    private fun drawTextSelectionHandles(
-        canvas: Canvas,
-        textElement: TextElement
-    ) {
-
-        val rotationHandle =
-            getRotationHandlePosition(
-                textElement
-            )
-
-        val resizeHandle =
-            getResizeHandlePosition(
-                textElement
-            )
-
-        val bounds =
-            textElement.getBounds()
-
-        /*
-         * Four corners of the local selection bounds.
-         */
-        val topLeft =
-            transformElementPoint(
-                textElement,
-                PointF(
-                    bounds.left,
-                    bounds.top
-                )
-            )
-
-        val topRight =
-            transformElementPoint(
-                textElement,
-                PointF(
-                    bounds.right,
-                    bounds.top
-                )
-            )
-
-        val bottomLeft =
-            transformElementPoint(
-                textElement,
-                PointF(
-                    bounds.left,
-                    bounds.bottom
-                )
-            )
-
-        val bottomRight =
-            transformElementPoint(
-                textElement,
-                PointF(
-                    bounds.right,
-                    bounds.bottom
-                )
-            )
-
-        val selectionPaint =
-            Paint(
-                Paint.ANTI_ALIAS_FLAG
-            ).apply {
-
-                style =
-                    Paint.Style.STROKE
-
-                strokeWidth =
-                    SELECTION_STROKE_WIDTH
-
-                color =
-                    Color.WHITE
-            }
-
-        // ---------------------------------------------------------------------
-        // SELECTION RECTANGLE
-        // ---------------------------------------------------------------------
-
-        val path =
-            android.graphics.Path()
-
-        path.moveTo(
-            topLeft.x,
-            topLeft.y
-        )
-
-        path.lineTo(
-            topRight.x,
-            topRight.y
-        )
-
-        path.lineTo(
-            bottomRight.x,
-            bottomRight.y
-        )
-
-        path.lineTo(
-            bottomLeft.x,
-            bottomLeft.y
-        )
-
-        path.close()
-
-        canvas.drawPath(
-            path,
-            selectionPaint
-        )
-
-        // ---------------------------------------------------------------------
-        // ROTATION CONNECTOR
-        // ---------------------------------------------------------------------
-
-        val topCenter =
-            PointF(
-                (topLeft.x + topRight.x) / 2f,
-                (topLeft.y + topRight.y) / 2f
-            )
-
-        canvas.drawLine(
-            topCenter.x,
-            topCenter.y,
-            rotationHandle.x,
-            rotationHandle.y,
-            selectionPaint
-        )
-
-        // ---------------------------------------------------------------------
-        // ROTATION HANDLE
-        // ---------------------------------------------------------------------
-
-        val handleFillPaint =
-            Paint(
-                Paint.ANTI_ALIAS_FLAG
-            ).apply {
-
-                style =
-                    Paint.Style.FILL
-
-                color =
-                    Color.WHITE
-            }
-
-        canvas.drawCircle(
-            rotationHandle.x,
-            rotationHandle.y,
-            HANDLE_RADIUS,
-            handleFillPaint
-        )
-
-        canvas.drawCircle(
-            rotationHandle.x,
-            rotationHandle.y,
-            HANDLE_RADIUS,
-            selectionPaint
-        )
-
-        // ---------------------------------------------------------------------
-        // RESIZE HANDLE
-        // ---------------------------------------------------------------------
-
-        canvas.drawCircle(
-            resizeHandle.x,
-            resizeHandle.y,
-            HANDLE_RADIUS,
-            handleFillPaint
-        )
-
-        canvas.drawCircle(
-            resizeHandle.x,
-            resizeHandle.y,
-            HANDLE_RADIUS,
-            selectionPaint
-        )
-    }
-
-    // =========================================================================
-    // CROP TOUCH
-    // =========================================================================
-
-    /**
-     * Owns all touch events while crop mode is active.
-     *
-     * Phase 5.3 added corner resizing.
-     * Phase 5.4 adds moving the complete crop rectangle.
-     * Aspect-ratio constraints are intentionally left for the following
-     * phases.
-     */
-    private fun handleCropTouch(event: MotionEvent) {
-
-        val cropRect = cropRectImage
-        val currentBitmap = bitmap
-
-        if (cropRect == null || currentBitmap == null) {
-            return
-        }
-
-        when (event.actionMasked) {
-
-            MotionEvent.ACTION_DOWN -> {
-
-                lastTouchX = event.x
-                lastTouchY = event.y
-
-                isDragging = true
-                isMovingElement = false
-                transformMode = TransformMode.NONE
-
-                // Corner handles always get priority.
-                activeCropHandle =
-                    findCropHandle(
-                        event.x,
-                        event.y
-                    )
-
-                // If no corner was touched, check the actual visible crop
-                // rectangle in SCREEN coordinates. This is more reliable for
-                // moving because the user is interacting with what they see.
-                if (activeCropHandle == CropHandle.NONE) {
-
-                    val cropRectOnScreen =
-                        getCropRectOnScreen()
-
-                    if (
-                        cropRectOnScreen != null &&
-                        cropRectOnScreen.contains(
-                            event.x,
-                            event.y
-                        )
-                    ) {
-                        activeCropHandle = CropHandle.MOVE
-                    }
-                }
-
-                Log.d(
-                    TAG,
-                    "Crop touch started: " +
-                            "x=${event.x}, " +
-                            "y=${event.y}, " +
-                            "handle=$activeCropHandle"
-                )
-            }
-
-            MotionEvent.ACTION_MOVE -> {
-
-                when (activeCropHandle) {
-
-                    CropHandle.MOVE -> {
-                        moveCropArea(
-                            previousScreenX = lastTouchX,
-                            previousScreenY = lastTouchY,
-                            currentScreenX = event.x,
-                            currentScreenY = event.y
-                        )
-                    }
-
-                    CropHandle.TOP_LEFT,
-                    CropHandle.TOP_RIGHT,
-                    CropHandle.BOTTOM_LEFT,
-                    CropHandle.BOTTOM_RIGHT -> {
-
-                        val imagePoint =
-                            screenToImage(
-                                event.x,
-                                event.y
-                            ) ?: return
-
-                        resizeCropFromHandle(
-                            imagePoint.x,
-                            imagePoint.y,
-                            activeCropHandle
-                        )
-                    }
-
-                    CropHandle.NONE -> {
-                        return
-                    }
-                }
-
-                lastTouchX = event.x
-                lastTouchY = event.y
-
-                invalidate()
-            }
-
-            MotionEvent.ACTION_UP,
-            MotionEvent.ACTION_CANCEL -> {
-
-                isDragging = false
-                isMovingElement = false
-                transformMode = TransformMode.NONE
-
-                Log.d(
-                    TAG,
-                    "Crop touch ended. " +
-                            "handle=$activeCropHandle, " +
-                            "cropRect=$cropRectImage"
-                )
-
-                activeCropHandle = CropHandle.NONE
-            }
-        }
-    }
-
-    /**
-     * Finds which crop corner is being touched.
-     *
-     * Hit testing is performed in screen coordinates because the visible
-     * handles are drawn there and the user interacts with the screen.
-     */
-    private fun findCropHandle(
-        screenX: Float,
-        screenY: Float
-    ): CropHandle {
-
-        val cropRect =
-            getCropRectOnScreen()
-                ?: return CropHandle.NONE
-
-        val touchRadius =
-            CROP_HANDLE_TOUCH_RADIUS
-
-        if (
-            hypot(
-                screenX - cropRect.left,
-                screenY - cropRect.top
-            ) <= touchRadius
-        ) {
-            return CropHandle.TOP_LEFT
-        }
-
-        if (
-            hypot(
-                screenX - cropRect.right,
-                screenY - cropRect.top
-            ) <= touchRadius
-        ) {
-            return CropHandle.TOP_RIGHT
-        }
-
-        if (
-            hypot(
-                screenX - cropRect.left,
-                screenY - cropRect.bottom
-            ) <= touchRadius
-        ) {
-            return CropHandle.BOTTOM_LEFT
-        }
-
-        if (
-            hypot(
-                screenX - cropRect.right,
-                screenY - cropRect.bottom
-            ) <= touchRadius
-        ) {
-            return CropHandle.BOTTOM_RIGHT
-        }
-
-        return CropHandle.NONE
-    }
-
-    /**
-     * Moves the complete crop selection without changing its size.
-     *
-     * Movement is calculated in original image coordinates so it remains
-     * correct regardless of the current image scale or pan.
-     */
-    private fun moveCropArea(
-        previousScreenX: Float,
-        previousScreenY: Float,
-        currentScreenX: Float,
-        currentScreenY: Float
-    ) {
-
-        val cropRect =
-            cropRectImage
-                ?: return
-
-        val currentBitmap =
-            bitmap
-                ?: return
-
-        val previousImagePoint =
-            screenToImage(
-                previousScreenX,
-                previousScreenY
-            )
-
-        val currentImagePoint =
-            screenToImage(
-                currentScreenX,
-                currentScreenY
-            )
-
-        if (
-            previousImagePoint == null ||
-            currentImagePoint == null
-        ) {
-            Log.d(
-                TAG,
-                "Crop move ignored: unable to convert touch to image coordinates"
-            )
-            return
-        }
-
-        // Convert the user's screen movement into ORIGINAL IMAGE movement.
-        // This keeps crop movement correct regardless of image scaling.
-        val deltaX =
-            currentImagePoint.x -
-                    previousImagePoint.x
-
-        val deltaY =
-            currentImagePoint.y -
-                    previousImagePoint.y
-
-        val imageWidth =
-            currentBitmap.width.toFloat()
-
-        val imageHeight =
-            currentBitmap.height.toFloat()
-
-        val cropWidth =
-            cropRect.width()
-
-        val cropHeight =
-            cropRect.height()
-
-        val maxLeft =
-            (imageWidth - cropWidth)
-                .coerceAtLeast(0f)
-
-        val maxTop =
-            (imageHeight - cropHeight)
-                .coerceAtLeast(0f)
-
-        val newLeft =
-            (cropRect.left + deltaX)
-                .coerceIn(
-                    0f,
-                    maxLeft
-                )
-
-        val newTop =
-            (cropRect.top + deltaY)
-                .coerceIn(
-                    0f,
-                    maxTop
-                )
-
-        cropRect.offsetTo(
-            newLeft,
-            newTop
-        )
-
-        Log.d(
-            TAG,
-            "Crop area moved: " +
-                    "deltaX=$deltaX " +
-                    "deltaY=$deltaY " +
-                    "rect=$cropRect"
-        )
-    }
-
-
-    /**
-     * Resizes the crop rectangle from one corner.
-     *
-     * The opposite corner remains fixed.
-     * The rectangle is always constrained to the original bitmap bounds and
-     * cannot become smaller than MIN_CROP_SIZE.
-     */
-    private fun resizeCropFromHandle(
-        imageX: Float,
-        imageY: Float,
-        handle: CropHandle
-    ) {
-
-        val cropRect = cropRectImage ?: return
-        val currentBitmap = bitmap ?: return
-
-        val imageWidth = currentBitmap.width.toFloat()
-        val imageHeight = currentBitmap.height.toFloat()
-
-        val minSize = MIN_CROP_SIZE.toFloat()
-
-        when (cropAspectRatio) {
-
-            CropAspectRatio.FREE -> {
-                resizeCropFree(
-                    imageX = imageX,
-                    imageY = imageY,
-                    handle = handle,
-                    imageWidth = imageWidth,
-                    imageHeight = imageHeight,
-                    minSize = minSize
-                )
-            }
-
-            CropAspectRatio.ONE_TO_ONE -> {
-                resizeCropWithAspectRatio(
-                    imageX = imageX,
-                    imageY = imageY,
-                    handle = handle,
-                    aspectRatio = 1f,
-                    imageWidth = imageWidth,
-                    imageHeight = imageHeight,
-                    minSize = minSize
-                )
-            }
-
-            CropAspectRatio.FOUR_TO_THREE -> {
-                resizeCropWithAspectRatio(
-                    imageX = imageX,
-                    imageY = imageY,
-                    handle = handle,
-                    aspectRatio = 4f / 3f,
-                    imageWidth = imageWidth,
-                    imageHeight = imageHeight,
-                    minSize = minSize
-                )
-            }
-
-            CropAspectRatio.SIXTEEN_TO_NINE -> {
-                resizeCropWithAspectRatio(
-                    imageX = imageX,
-                    imageY = imageY,
-                    handle = handle,
-                    aspectRatio = 16f / 9f,
-                    imageWidth = imageWidth,
-                    imageHeight = imageHeight,
-                    minSize = minSize
-                )
-            }
-
-            CropAspectRatio.ORIGINAL_RATIO -> {
-                resizeCropWithAspectRatio(
-                    imageX = imageX,
-                    imageY = imageY,
-                    handle = handle,
-                    aspectRatio = imageWidth / imageHeight,
-                    imageWidth = imageWidth,
-                    imageHeight = imageHeight,
-                    minSize = minSize
-                )
-            }
-        }
-
-        Log.d(
-            TAG,
-            "Crop resized: handle=$handle rect=$cropRect"
-        )
-    }
-
-    private fun resizeCropFree(
-        imageX: Float,
-        imageY: Float,
-        handle: CropHandle,
-        imageWidth: Float,
-        imageHeight: Float,
-        minSize: Float
-    ) {
-
-        val cropRect = cropRectImage ?: return
-
-        when (handle) {
-
-            CropHandle.TOP_LEFT -> {
-                cropRect.left = imageX.coerceIn(
-                    0f,
-                    cropRect.right - minSize
-                )
-                cropRect.top = imageY.coerceIn(
-                    0f,
-                    cropRect.bottom - minSize
-                )
-            }
-
-            CropHandle.TOP_RIGHT -> {
-                cropRect.right = imageX.coerceIn(
-                    cropRect.left + minSize,
-                    imageWidth
-                )
-                cropRect.top = imageY.coerceIn(
-                    0f,
-                    cropRect.bottom - minSize
-                )
-            }
-
-            CropHandle.BOTTOM_LEFT -> {
-                cropRect.left = imageX.coerceIn(
-                    0f,
-                    cropRect.right - minSize
-                )
-                cropRect.bottom = imageY.coerceIn(
-                    cropRect.top + minSize,
-                    imageHeight
-                )
-            }
-
-            CropHandle.BOTTOM_RIGHT -> {
-                cropRect.right = imageX.coerceIn(
-                    cropRect.left + minSize,
-                    imageWidth
-                )
-                cropRect.bottom = imageY.coerceIn(
-                    cropRect.top + minSize,
-                    imageHeight
-                )
-            }
-
-            CropHandle.MOVE,
-            CropHandle.NONE -> Unit
-        }
-    }
-
-    /**
-     * Resizes the crop rectangle while keeping width / height at
-     * the requested aspect ratio.
-     *
-     * aspectRatio = width / height.
-     */
-    private fun resizeCropWithAspectRatio(
-        imageX: Float,
-        imageY: Float,
-        handle: CropHandle,
-        aspectRatio: Float,
-        imageWidth: Float,
-        imageHeight: Float,
-        minSize: Float
-    ) {
-
-        val cropRect = cropRectImage ?: return
-
-        if (aspectRatio <= 0f) {
-            return
-        }
-
-        val minWidth = max(
-            minSize,
-            minSize * aspectRatio
-        )
-
-        val minHeight = max(
-            minSize,
-            minSize / aspectRatio
-        )
-
-        when (handle) {
-
-            CropHandle.TOP_LEFT -> {
-
-                val anchorX = cropRect.right
-                val anchorY = cropRect.bottom
-
-                val requestedWidth = max(
-                    anchorX - imageX,
-                    (anchorY - imageY) * aspectRatio
-                )
-
-                val maxWidth = min(
-                    anchorX,
-                    anchorY * aspectRatio
-                )
-
-                val width = requestedWidth.coerceIn(
-                    minWidth,
-                    maxWidth.coerceAtLeast(minWidth)
-                )
-
-                val height = width / aspectRatio
-
-                cropRect.set(
-                    anchorX - width,
-                    anchorY - height,
-                    anchorX,
-                    anchorY
-                )
-            }
-
-            CropHandle.TOP_RIGHT -> {
-
-                val anchorX = cropRect.left
-                val anchorY = cropRect.bottom
-
-                val requestedWidth = max(
-                    imageX - anchorX,
-                    (anchorY - imageY) * aspectRatio
-                )
-
-                val maxWidth = min(
-                    imageWidth - anchorX,
-                    anchorY * aspectRatio
-                )
-
-                val width = requestedWidth.coerceIn(
-                    minWidth,
-                    maxWidth.coerceAtLeast(minWidth)
-                )
-
-                val height = width / aspectRatio
-
-                cropRect.set(
-                    anchorX,
-                    anchorY - height,
-                    anchorX + width,
-                    anchorY
-                )
-            }
-
-            CropHandle.BOTTOM_LEFT -> {
-
-                val anchorX = cropRect.right
-                val anchorY = cropRect.top
-
-                val requestedWidth = max(
-                    anchorX - imageX,
-                    (imageY - anchorY) * aspectRatio
-                )
-
-                val maxWidth = min(
-                    anchorX,
-                    (imageHeight - anchorY) * aspectRatio
-                )
-
-                val width = requestedWidth.coerceIn(
-                    minWidth,
-                    maxWidth.coerceAtLeast(minWidth)
-                )
-
-                val height = width / aspectRatio
-
-                cropRect.set(
-                    anchorX - width,
-                    anchorY,
-                    anchorX,
-                    anchorY + height
-                )
-            }
-
-            CropHandle.BOTTOM_RIGHT -> {
-
-                val anchorX = cropRect.left
-                val anchorY = cropRect.top
-
-                val requestedWidth = max(
-                    imageX - anchorX,
-                    (imageY - anchorY) * aspectRatio
-                )
-
-                val maxWidth = min(
-                    imageWidth - anchorX,
-                    (imageHeight - anchorY) * aspectRatio
-                )
-
-                val width = requestedWidth.coerceIn(
-                    minWidth,
-                    maxWidth.coerceAtLeast(minWidth)
-                )
-
-                val height = width / aspectRatio
-
-                cropRect.set(
-                    anchorX,
-                    anchorY,
-                    anchorX + width,
-                    anchorY + height
-                )
-            }
-
-            CropHandle.MOVE,
-            CropHandle.NONE -> Unit
-        }
-    }
-
-    /**
-     * Changes the current crop rectangle to the requested aspect ratio
-     * while preserving its center as much as possible.
-     */
-    private fun normalizeCropToAspectRatio(
-        aspectRatio: Float
-    ) {
-
-        val cropRect = cropRectImage ?: return
-        val currentBitmap = bitmap ?: return
-
-        if (aspectRatio <= 0f) {
-            return
-        }
-
-        val imageWidth = currentBitmap.width.toFloat()
-        val imageHeight = currentBitmap.height.toFloat()
-
-        var width = cropRect.width()
-        var height = cropRect.height()
-
-        if (width <= 0f || height <= 0f) {
-            return
-        }
-
-        if (width / height > aspectRatio) {
-            width = height * aspectRatio
-        } else {
-            height = width / aspectRatio
-        }
-
-        if (width > imageWidth) {
-            width = imageWidth
-            height = width / aspectRatio
-        }
-
-        if (height > imageHeight) {
-            height = imageHeight
-            width = height * aspectRatio
-        }
-
-        val left = (
-                cropRect.centerX() - width / 2f
-                ).coerceIn(
-                0f,
-                (imageWidth - width).coerceAtLeast(0f)
-            )
-
-        val top = (
-                cropRect.centerY() - height / 2f
-                ).coerceIn(
-                0f,
-                (imageHeight - height).coerceAtLeast(0f)
-            )
-
-        cropRect.set(
-            left,
-            top,
-            left + width,
-            top + height
-        )
-
-        Log.d(
-            TAG,
-            "Crop normalized to ratio=$aspectRatio rect=$cropRect"
-        )
-    }
-
-    /**
-     * Keeps compatibility with the existing 1:1 crop implementation.
-     */
-    private fun normalizeCropToOneToOne() {
-        normalizeCropToAspectRatio(1f)
-    }
-
-
-    /**
-     * Resizes a crop corner while keeping width and height equal.
-     * The opposite corner remains fixed.
-     */
-    private fun resizeCropOneToOne(
-        imageX: Float,
-        imageY: Float,
-        handle: CropHandle,
-        minCropSize: Float,
-        imageWidth: Float,
-        imageHeight: Float
-    ) {
-
-        val cropRect = cropRectImage ?: return
-
-        when (handle) {
-
-            CropHandle.TOP_LEFT -> {
-                val anchorX = cropRect.right
-                val anchorY = cropRect.bottom
-                val maxSize = min(anchorX, anchorY)
-                val requestedSize = max(abs(anchorX - imageX), abs(anchorY - imageY))
-                val size = requestedSize.coerceIn(minCropSize, maxSize)
-                cropRect.set(anchorX - size, anchorY - size, anchorX, anchorY)
-            }
-
-            CropHandle.TOP_RIGHT -> {
-                val anchorX = cropRect.left
-                val anchorY = cropRect.bottom
-                val maxSize = min(imageWidth - anchorX, anchorY)
-                val requestedSize = max(abs(imageX - anchorX), abs(anchorY - imageY))
-                val size = requestedSize.coerceIn(minCropSize, maxSize)
-                cropRect.set(anchorX, anchorY - size, anchorX + size, anchorY)
-            }
-
-            CropHandle.BOTTOM_LEFT -> {
-                val anchorX = cropRect.right
-                val anchorY = cropRect.top
-                val maxSize = min(anchorX, imageHeight - anchorY)
-                val requestedSize = max(abs(anchorX - imageX), abs(imageY - anchorY))
-                val size = requestedSize.coerceIn(minCropSize, maxSize)
-                cropRect.set(anchorX - size, anchorY, anchorX, anchorY + size)
-            }
-
-            CropHandle.BOTTOM_RIGHT -> {
-                val anchorX = cropRect.left
-                val anchorY = cropRect.top
-                val maxSize = min(imageWidth - anchorX, imageHeight - anchorY)
-                val requestedSize = max(abs(imageX - anchorX), abs(imageY - anchorY))
-                val size = requestedSize.coerceIn(minCropSize, maxSize)
-                cropRect.set(anchorX, anchorY, anchorX + size, anchorY + size)
-            }
-
-            CropHandle.MOVE,
-            CropHandle.NONE -> Unit
-        }
-    }
-
     // =========================================================================
     // LIFECYCLE
     // =========================================================================
 
-    /** Releases the adjustment preview worker when the view leaves the window. */
+    /** Releases temporary adjustment processing when the view leaves the window. */
     override fun onDetachedFromWindow() {
-        adjustmentPreviewGeneration++
-        pendingAdjustmentPreview.set(null)
-
-        adjustmentPreviewExecutor?.shutdownNow()
-        adjustmentPreviewExecutor = null
-
+        adjustmentController.close()
         super.onDetachedFromWindow()
     }
 
@@ -4972,26 +3376,26 @@ class PhotoEditorView @JvmOverloads constructor(
         event: MotionEvent
     ): Boolean {
 
-        if (isCropMode) {
-            handleCropTouch(event)
+        if (cropModeActive) {
+            cropController.handleTouch(event)
             return true
         }
 
         // Rotation mode is a button-driven preview session. Ignore all canvas
         // gestures while it is active so pan, zoom, text movement and element
         // transforms cannot mutate the temporary rotation state.
-        if (isRotationMode) {
+        if (rotationModeActive) {
             return true
         }
 
         // Adjustment mode is controlled by the adjustment toolbar.
         // Canvas gestures must not mutate the editor during this session.
-        if (isAdjustmentMode) {
+        if (adjustmentModeActive) {
             return true
         }
 
         // Filter mode is controlled by the filter toolbar.
-        if (isFilterMode) {
+        if (filterModeActive) {
             return true
         }
 

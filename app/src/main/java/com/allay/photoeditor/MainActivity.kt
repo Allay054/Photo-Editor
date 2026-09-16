@@ -1243,8 +1243,10 @@ class MainActivity : AppCompatActivity() {
             btnAddText.isEnabled = !isRotationMode
             btnCrop.isEnabled = !isRotationMode
             btnAdjust.isEnabled = !isRotationMode
-            btnFlipHorizontal.isEnabled = !isRotationMode
-            btnFlipVertical.isEnabled = !isRotationMode
+//            btnFlipHorizontal.isEnabled = !isRotationMode
+//            btnFlipVertical.isEnabled = !isRotationMode
+            btnFlipHorizontal.isEnabled = true
+            btnFlipVertical.isEnabled = true
             btnDelete.isEnabled = !isRotationMode && photoEditorView.getSelectedElement() != null
             btnRotateLeft.isEnabled = true
             btnRotateRight.isEnabled = true
