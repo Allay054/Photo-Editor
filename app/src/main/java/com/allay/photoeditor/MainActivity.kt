@@ -21,6 +21,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.allay.photoeditor.editor.PhotoEditorView
 import com.allay.photoeditor.model.EditorElement
+import com.allay.photoeditor.model.FilterType
 import com.allay.photoeditor.model.TextElement
 import com.allay.photoeditor.utils.ColorPickerDialog
 
@@ -64,6 +65,87 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var btnTransform:
             Button
+
+    // -------------------------------------------------------------------------
+    // ADJUSTMENT TOOLS - PHASE 7.1
+    // -------------------------------------------------------------------------
+
+    private lateinit var btnAdjust:
+            Button
+
+    private lateinit var adjustmentToolsScroll:
+            View
+
+    private lateinit var btnAdjustmentReset:
+            Button
+
+    private lateinit var btnAdjustmentCancel:
+            Button
+
+    private lateinit var btnAdjustmentApply:
+            Button
+
+    private lateinit var brightnessSeekBar:
+            SeekBar
+
+    private lateinit var contrastSeekBar:
+            SeekBar
+
+    private lateinit var saturationSeekBar:
+            SeekBar
+
+    private lateinit var exposureSeekBar:
+            SeekBar
+
+    private lateinit var temperatureSeekBar:
+            SeekBar
+
+    private lateinit var highlightsSeekBar:
+            SeekBar
+
+    private lateinit var shadowsSeekBar:
+            SeekBar
+
+    private lateinit var brightnessValueText:
+            TextView
+
+    private lateinit var contrastValueText:
+            TextView
+
+    private lateinit var saturationValueText:
+            TextView
+
+    private lateinit var exposureValueText:
+            TextView
+
+    private lateinit var temperatureValueText:
+            TextView
+
+    private lateinit var highlightsValueText:
+            TextView
+
+    private lateinit var shadowsValueText:
+            TextView
+
+    private var isUpdatingAdjustmentControls = false
+
+    // -------------------------------------------------------------------------
+    // FILTER TOOLS - PHASE 7.2
+    // -------------------------------------------------------------------------
+
+    private lateinit var btnFilters: Button
+    private lateinit var filterToolsScroll: View
+    private lateinit var btnFilterOriginal: Button
+    private lateinit var btnFilterGrayscale: Button
+    private lateinit var btnFilterBlackWhite: Button
+    private lateinit var btnFilterSepia: Button
+    private lateinit var btnFilterVintage: Button
+    private lateinit var btnFilterWarm: Button
+    private lateinit var btnFilterCool: Button
+    private lateinit var btnFilterCancel: Button
+    private lateinit var btnFilterApply: Button
+
+    private var selectedFilterType = FilterType.ORIGINAL
 
     private lateinit var btnFlipHorizontal:
             Button
@@ -187,6 +269,58 @@ class MainActivity : AppCompatActivity() {
                 R.id.btnTransform
             )
 
+        btnAdjust =
+            findViewById(
+                R.id.btnAdjust
+            )
+
+        adjustmentToolsScroll =
+            findViewById(
+                R.id.adjustmentToolsScroll
+            )
+
+        btnAdjustmentReset =
+            findViewById(
+                R.id.btnAdjustmentReset
+            )
+
+        btnAdjustmentCancel =
+            findViewById(
+                R.id.btnAdjustmentCancel
+            )
+
+        btnAdjustmentApply =
+            findViewById(
+                R.id.btnAdjustmentApply
+            )
+
+        brightnessSeekBar = findViewById(R.id.seekBrightness)
+        contrastSeekBar = findViewById(R.id.seekContrast)
+        saturationSeekBar = findViewById(R.id.seekSaturation)
+        exposureSeekBar = findViewById(R.id.seekExposure)
+        temperatureSeekBar = findViewById(R.id.seekTemperature)
+        highlightsSeekBar = findViewById(R.id.seekHighlights)
+        shadowsSeekBar = findViewById(R.id.seekShadows)
+        brightnessValueText = findViewById(R.id.txtBrightnessValue)
+        contrastValueText = findViewById(R.id.txtContrastValue)
+        saturationValueText = findViewById(R.id.txtSaturationValue)
+        exposureValueText = findViewById(R.id.txtExposureValue)
+        temperatureValueText = findViewById(R.id.txtTemperatureValue)
+        highlightsValueText = findViewById(R.id.txtHighlightsValue)
+        shadowsValueText = findViewById(R.id.txtShadowsValue)
+
+        btnFilters = findViewById(R.id.btnFilters)
+        filterToolsScroll = findViewById(R.id.filterToolsScroll)
+        btnFilterOriginal = findViewById(R.id.btnFilterOriginal)
+        btnFilterGrayscale = findViewById(R.id.btnFilterGrayscale)
+        btnFilterBlackWhite = findViewById(R.id.btnFilterBlackWhite)
+        btnFilterSepia = findViewById(R.id.btnFilterSepia)
+        btnFilterVintage = findViewById(R.id.btnFilterVintage)
+        btnFilterWarm = findViewById(R.id.btnFilterWarm)
+        btnFilterCool = findViewById(R.id.btnFilterCool)
+        btnFilterCancel = findViewById(R.id.btnFilterCancel)
+        btnFilterApply = findViewById(R.id.btnFilterApply)
+
         btnFlipHorizontal =
             findViewById(
                 R.id.btnFlipHorizontal
@@ -264,6 +398,8 @@ class MainActivity : AppCompatActivity() {
         setupListeners()
 
         updateCropTools(false)
+        adjustmentToolsScroll.visibility = View.GONE
+        filterToolsScroll.visibility = View.GONE
         updateDeleteButton()
 
         updateTextEditButton(
@@ -422,6 +558,138 @@ class MainActivity : AppCompatActivity() {
             }
 
             photoEditorView.enterTransformMode()
+        }
+
+        // ---------------------------------------------------------------------
+        // ADJUSTMENT MODE - PHASE 7.1
+        // ---------------------------------------------------------------------
+
+        btnAdjust.setOnClickListener {
+            Log.d(TAG, "Adjust button clicked")
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode() || photoEditorView.isRotationMode()) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel the current edit mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            photoEditorView.enterAdjustmentMode()
+        }
+
+        btnAdjustmentReset.setOnClickListener {
+            Log.d(TAG, "Reset adjustments clicked")
+            photoEditorView.resetAdjustments()
+            updateAdjustmentControls(photoEditorView.getAdjustmentState())
+        }
+
+        btnAdjustmentCancel.setOnClickListener {
+            Log.d(TAG, "Cancel adjustments clicked")
+            photoEditorView.cancelAdjustments()
+        }
+
+        btnAdjustmentApply.setOnClickListener {
+            Log.d(TAG, "Apply adjustments clicked")
+            photoEditorView.applyAdjustments()
+        }
+
+        brightnessSeekBar.max = 100
+        contrastSeekBar.max = 100
+        saturationSeekBar.max = 100
+        exposureSeekBar.max = 100
+        temperatureSeekBar.max = 100
+        highlightsSeekBar.max = 100
+        shadowsSeekBar.max = 100
+
+        brightnessSeekBar.setOnSeekBarChangeListener(
+            createAdjustmentSeekBarListener { value ->
+                updateAdjustmentState(brightness = value)
+            }
+        )
+
+        contrastSeekBar.setOnSeekBarChangeListener(
+            createAdjustmentSeekBarListener { value ->
+                updateAdjustmentState(contrast = value)
+            }
+        )
+
+        saturationSeekBar.setOnSeekBarChangeListener(
+            createAdjustmentSeekBarListener { value ->
+                updateAdjustmentState(saturation = value)
+            }
+        )
+
+        exposureSeekBar.setOnSeekBarChangeListener(
+            createAdjustmentSeekBarListener { value ->
+                updateAdjustmentState(exposure = value)
+            }
+        )
+
+        temperatureSeekBar.setOnSeekBarChangeListener(
+            createAdjustmentSeekBarListener { value ->
+                updateAdjustmentState(temperature = value)
+            }
+        )
+
+        highlightsSeekBar.setOnSeekBarChangeListener(
+            createAdjustmentSeekBarListener { value ->
+                updateAdjustmentState(highlights = value)
+            }
+        )
+
+        shadowsSeekBar.setOnSeekBarChangeListener(
+            createAdjustmentSeekBarListener { value ->
+                updateAdjustmentState(shadows = value)
+            }
+        )
+
+        updateAdjustmentControls(photoEditorView.getAdjustmentState())
+
+        // ---------------------------------------------------------------------
+        // FILTER MODE - PHASE 7.2
+        // ---------------------------------------------------------------------
+
+        btnFilters.setOnClickListener {
+            Log.d(TAG, "Filters button clicked")
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(this, "Please select an image first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            if (photoEditorView.isCropMode() || photoEditorView.isRotationMode() || photoEditorView.isAdjustmentMode()) {
+                Toast.makeText(this, "Finish or cancel the current edit mode first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            selectedFilterType = FilterType.ORIGINAL
+            updateFilterButtons()
+            photoEditorView.enterFilterMode()
+        }
+
+        btnFilterOriginal.setOnClickListener { selectFilter(FilterType.ORIGINAL) }
+        btnFilterGrayscale.setOnClickListener { selectFilter(FilterType.GRAYSCALE) }
+        btnFilterBlackWhite.setOnClickListener { selectFilter(FilterType.BLACK_WHITE) }
+        btnFilterSepia.setOnClickListener { selectFilter(FilterType.SEPIA) }
+        btnFilterVintage.setOnClickListener { selectFilter(FilterType.VINTAGE) }
+        btnFilterWarm.setOnClickListener { selectFilter(FilterType.WARM) }
+        btnFilterCool.setOnClickListener { selectFilter(FilterType.COOL) }
+        btnFilterCancel.setOnClickListener {
+            Log.d(TAG, "Cancel filters clicked")
+            photoEditorView.cancelFilterMode()
+        }
+
+        btnFilterApply.setOnClickListener {
+            Log.d(TAG, "Apply filter clicked: $selectedFilterType")
+            photoEditorView.applyFilter()
         }
 
         // ---------------------------------------------------------------------
@@ -925,6 +1193,43 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ---------------------------------------------------------------------
+        // FILTER MODE CHANGED - PHASE 7.2
+        // ---------------------------------------------------------------------
+
+        photoEditorView.onFilterModeChanged = { isFilterMode ->
+            Log.d(TAG, "Filter mode changed: $isFilterMode")
+            filterToolsScroll.visibility = if (isFilterMode) View.VISIBLE else View.GONE
+            mainToolsScroll.visibility = if (isFilterMode) View.GONE else View.VISIBLE
+            rotationToolsScroll.visibility = View.GONE
+            cropToolsScroll.visibility = View.GONE
+            textToolsScroll.visibility = View.GONE
+            adjustmentToolsScroll.visibility = View.GONE
+            btnSelectImage.isEnabled = !isFilterMode
+            btnAddText.isEnabled = !isFilterMode
+            btnCrop.isEnabled = !isFilterMode
+            btnTransform.isEnabled = !isFilterMode
+            btnAdjust.isEnabled = !isFilterMode
+            btnFilters.isEnabled = !isFilterMode
+            btnFilterApply.isEnabled = isFilterMode
+            btnDelete.isEnabled = !isFilterMode && photoEditorView.getSelectedElement() != null
+            if (isFilterMode) {
+                updateFilterButtons()
+            } else {
+                updateDeleteButton()
+                updateTextEditButton(photoEditorView.getSelectedElement())
+                updateTextColorButton(photoEditorView.getSelectedElement())
+                updateTextSizeButton(photoEditorView.getSelectedElement())
+                updateTextBoldButton(photoEditorView.getSelectedElement())
+                updateTextItalicButton(photoEditorView.getSelectedElement())
+                updateTextAlignmentButton(photoEditorView.getSelectedElement())
+                updateTextBackgroundButton(photoEditorView.getSelectedElement())
+                updateTextBackgroundColorButton(photoEditorView.getSelectedElement())
+                updateTextFontButton(photoEditorView.getSelectedElement())
+                updateTextMultiColorButton(photoEditorView.getSelectedElement())
+            }
+        }
+
+        // ---------------------------------------------------------------------
         // ROTATION MODE CHANGED
         // ---------------------------------------------------------------------
 
@@ -937,6 +1242,7 @@ class MainActivity : AppCompatActivity() {
             btnSelectImage.isEnabled = !isRotationMode
             btnAddText.isEnabled = !isRotationMode
             btnCrop.isEnabled = !isRotationMode
+            btnAdjust.isEnabled = !isRotationMode
             btnFlipHorizontal.isEnabled = !isRotationMode
             btnFlipVertical.isEnabled = !isRotationMode
             btnDelete.isEnabled = !isRotationMode && photoEditorView.getSelectedElement() != null
@@ -961,6 +1267,51 @@ class MainActivity : AppCompatActivity() {
         // ---------------------------------------------------------------------
         // CROP MODE CHANGED
         // ---------------------------------------------------------------------
+
+        // ---------------------------------------------------------------------
+        // ADJUSTMENT MODE CHANGED - PHASE 7.1
+        // ---------------------------------------------------------------------
+        photoEditorView.onAdjustmentModeChanged = { isAdjustmentMode ->
+            Log.d(TAG, "Adjustment mode changed: $isAdjustmentMode")
+
+            if (isAdjustmentMode) {
+                updateAdjustmentControls(photoEditorView.getAdjustmentState())
+            }
+
+            adjustmentToolsScroll.visibility =
+                if (isAdjustmentMode) View.VISIBLE else View.GONE
+
+            mainToolsScroll.visibility =
+                if (isAdjustmentMode) View.GONE else View.VISIBLE
+
+            rotationToolsScroll.visibility = View.GONE
+            cropToolsScroll.visibility = View.GONE
+            textToolsScroll.visibility = View.GONE
+
+            btnSelectImage.isEnabled = !isAdjustmentMode
+            btnAddText.isEnabled = !isAdjustmentMode
+            btnCrop.isEnabled = !isAdjustmentMode
+            btnTransform.isEnabled = !isAdjustmentMode
+            btnAdjust.isEnabled = !isAdjustmentMode
+            btnFilters.isEnabled = !isAdjustmentMode
+            btnDelete.isEnabled =
+                !isAdjustmentMode &&
+                        photoEditorView.getSelectedElement() != null
+
+            if (!isAdjustmentMode) {
+                updateDeleteButton()
+                updateTextEditButton(photoEditorView.getSelectedElement())
+                updateTextColorButton(photoEditorView.getSelectedElement())
+                updateTextSizeButton(photoEditorView.getSelectedElement())
+                updateTextBoldButton(photoEditorView.getSelectedElement())
+                updateTextItalicButton(photoEditorView.getSelectedElement())
+                updateTextAlignmentButton(photoEditorView.getSelectedElement())
+                updateTextBackgroundButton(photoEditorView.getSelectedElement())
+                updateTextBackgroundColorButton(photoEditorView.getSelectedElement())
+                updateTextFontButton(photoEditorView.getSelectedElement())
+                updateTextMultiColorButton(photoEditorView.getSelectedElement())
+            }
+        }
 
         photoEditorView.onCropModeChanged = { isCropMode ->
 
@@ -2146,5 +2497,139 @@ class MainActivity : AppCompatActivity() {
                 "Original"
             }
     }
+
+    private fun createAdjustmentSeekBarListener(
+        onChanged: (Int) -> Unit
+    ): SeekBar.OnSeekBarChangeListener {
+        return object : SeekBar.OnSeekBarChangeListener {
+
+            override fun onProgressChanged(
+                seekBar: SeekBar?,
+                progress: Int,
+                fromUser: Boolean
+            ) {
+                if (
+                    fromUser &&
+                    !isUpdatingAdjustmentControls &&
+                    photoEditorView.isAdjustmentMode()
+                ) {
+                    onChanged(progress)
+                }
+            }
+
+            override fun onStartTrackingTouch(
+                seekBar: SeekBar?
+            ) {
+                seekBar?.parent?.requestDisallowInterceptTouchEvent(true)
+
+                Log.d(
+                    TAG,
+                    "Adjustment SeekBar drag started"
+                )
+            }
+
+            override fun onStopTrackingTouch(
+                seekBar: SeekBar?
+            ) {
+                seekBar?.parent?.requestDisallowInterceptTouchEvent(false)
+
+                Log.d(
+                    TAG,
+                    "Adjustment SeekBar drag stopped"
+                )
+            }
+        }
+    }
+
+    private fun updateAdjustmentState(
+        brightness: Int? = null,
+        contrast: Int? = null,
+        saturation: Int? = null,
+        exposure: Int? = null,
+        temperature: Int? = null,
+        highlights: Int? = null,
+        shadows: Int? = null
+    ) {
+        if (!photoEditorView.isAdjustmentMode()) return
+
+        val current = photoEditorView.getAdjustmentState()
+
+        val updated = current.copy(
+            brightness = brightness?.toFloat() ?: current.brightness,
+            contrast = contrast?.toFloat() ?: current.contrast,
+            saturation = saturation?.toFloat() ?: current.saturation,
+            exposure = exposure?.toFloat() ?: current.exposure,
+            temperature = temperature?.toFloat() ?: current.temperature,
+            highlights = highlights?.toFloat() ?: current.highlights,
+            shadows = shadows?.toFloat() ?: current.shadows
+        )
+
+        photoEditorView.setAdjustmentState(updated)
+        updateAdjustmentValueLabels(updated)
+    }
+
+    private fun updateAdjustmentControls(
+        state: com.allay.photoeditor.model.AdjustmentState
+    ) {
+        isUpdatingAdjustmentControls = true
+
+        brightnessSeekBar.progress = state.brightness.toInt().coerceIn(0, 100)
+        contrastSeekBar.progress = state.contrast.toInt().coerceIn(0, 100)
+        saturationSeekBar.progress = state.saturation.toInt().coerceIn(0, 100)
+        exposureSeekBar.progress = state.exposure.toInt().coerceIn(0, 100)
+        temperatureSeekBar.progress = state.temperature.toInt().coerceIn(0, 100)
+        highlightsSeekBar.progress = state.highlights.toInt().coerceIn(0, 100)
+        shadowsSeekBar.progress = state.shadows.toInt().coerceIn(0, 100)
+
+        updateAdjustmentValueLabels(state)
+
+        isUpdatingAdjustmentControls = false
+    }
+
+    private fun updateAdjustmentValueLabels(
+        state: com.allay.photoeditor.model.AdjustmentState
+    ) {
+        brightnessValueText.text = state.brightness.toInt().toString()
+        contrastValueText.text = state.contrast.toInt().toString()
+        saturationValueText.text = state.saturation.toInt().toString()
+        exposureValueText.text = state.exposure.toInt().toString()
+        temperatureValueText.text = state.temperature.toInt().toString()
+        highlightsValueText.text = state.highlights.toInt().toString()
+        shadowsValueText.text = state.shadows.toInt().toString()
+    }
+
+    private fun selectFilter(filterType: FilterType) {
+        if (!photoEditorView.isFilterMode()) return
+
+        selectedFilterType = filterType
+        photoEditorView.setFilter(filterType)
+        updateFilterButtons()
+
+        Log.d(TAG, "Filter selected: $filterType")
+    }
+
+    private fun updateFilterButtons() {
+        btnFilterOriginal.text =
+            if (selectedFilterType == FilterType.ORIGINAL) "✓ Original" else "Original"
+
+        btnFilterGrayscale.text =
+            if (selectedFilterType == FilterType.GRAYSCALE) "✓ Grayscale" else "Grayscale"
+
+        btnFilterBlackWhite.text =
+            if (selectedFilterType == FilterType.BLACK_WHITE) "✓ B&W" else "B&W"
+
+        btnFilterSepia.text =
+            if (selectedFilterType == FilterType.SEPIA) "✓ Sepia" else "Sepia"
+
+        btnFilterVintage.text =
+            if (selectedFilterType == FilterType.VINTAGE) "✓ Vintage" else "Vintage"
+
+        btnFilterWarm.text =
+            if (selectedFilterType == FilterType.WARM) "✓ Warm" else "Warm"
+
+        btnFilterCool.text =
+            if (selectedFilterType == FilterType.COOL) "✓ Cool" else "Cool"
+    }
+
 
 }

@@ -14,8 +14,16 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import com.allay.photoeditor.model.AdjustmentState
 import com.allay.photoeditor.model.EditorElement
+import com.allay.photoeditor.model.FilterType
 import com.allay.photoeditor.model.TextElement
+import com.allay.photoeditor.processing.ImageAdjustmentProcessor
+import com.allay.photoeditor.processing.ImageFilterProcessor
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -231,6 +239,234 @@ class PhotoEditorView @JvmOverloads constructor(
     private var rotationOriginalTranslationY = 0f
     private var isRotationMode = false
 
+    // =========================================================================
+    // FILTER MODE - PHASE 7.2
+    // =========================================================================
+
+    fun enterFilterMode() {
+        if (isFilterMode || isCropMode || isRotationMode || isAdjustmentMode) {
+            Log.d(TAG, "Filter mode ignored: another editor mode is active")
+            return
+        }
+
+        val currentBitmap = bitmap
+        if (currentBitmap == null) {
+            Log.d(TAG, "Filter mode ignored: no image selected")
+            return
+        }
+
+        filterOriginalBitmap = currentBitmap
+        filterPreviewBitmap = currentBitmap
+        filterType = FilterType.ORIGINAL
+        isFilterMode = true
+
+        resetGestureState()
+        onFilterModeChanged?.invoke(true)
+        invalidate()
+
+        Log.d(
+            TAG,
+            "Filter session started: bitmap=${currentBitmap.width}x${currentBitmap.height}"
+        )
+    }
+
+    fun isFilterMode(): Boolean = isFilterMode
+
+    /** Returns the filter currently selected in the temporary session. */
+    fun getFilterType(): FilterType = filterType
+
+    /** Applies a filter to the session source bitmap and refreshes the preview. */
+    fun setFilter(type: FilterType) {
+        if (!isFilterMode) {
+            Log.d(TAG, "Filter ignored: filter mode is not active")
+            return
+        }
+
+        val source = filterOriginalBitmap ?: bitmap
+        if (source == null) {
+            Log.w(TAG, "Filter ignored: source bitmap is missing")
+            return
+        }
+
+        if (type == filterType && filterPreviewBitmap != null) {
+            return
+        }
+
+        val previousPreview = filterPreviewBitmap
+        val preview = ImageFilterProcessor.process(
+            source = source,
+            filter = type
+        )
+
+        if (
+            previousPreview != null &&
+            previousPreview !== source &&
+            previousPreview !== preview &&
+            !previousPreview.isRecycled
+        ) {
+            previousPreview.recycle()
+        }
+
+        filterType = type
+        filterPreviewBitmap = preview
+        invalidate()
+
+        Log.d(TAG, "Filter selected: $type")
+    }
+
+    /** Commits the current filter preview to the editor bitmap. */
+    fun applyFilter() {
+        if (!isFilterMode) {
+            Log.d(TAG, "Apply filter ignored: filter mode is not active")
+            return
+        }
+
+        val appliedBitmap = filterPreviewBitmap ?: filterOriginalBitmap ?: bitmap
+        val originalBitmap = filterOriginalBitmap
+        val previewBitmap = filterPreviewBitmap
+        val appliedFilter = filterType
+
+        if (appliedBitmap == null) {
+            cancelFilterMode()
+            return
+        }
+
+        bitmap = appliedBitmap
+
+        if (
+            previewBitmap != null &&
+            previewBitmap !== appliedBitmap &&
+            previewBitmap !== originalBitmap &&
+            !previewBitmap.isRecycled
+        ) {
+            previewBitmap.recycle()
+        }
+
+        filterOriginalBitmap = null
+        filterPreviewBitmap = null
+        filterType = FilterType.ORIGINAL
+        isFilterMode = false
+
+        resetGestureState()
+        onFilterModeChanged?.invoke(false)
+        invalidate()
+
+        Log.d(TAG, "Filter applied: $appliedFilter")
+    }
+
+    /** Discards the temporary filter preview and restores the session source. */
+    fun cancelFilterMode() {
+        if (!isFilterMode) return
+
+        val originalBitmap = filterOriginalBitmap
+        val previewBitmap = filterPreviewBitmap
+
+        if (originalBitmap != null) {
+            bitmap = originalBitmap
+        }
+
+        if (
+            previewBitmap != null &&
+            previewBitmap !== originalBitmap &&
+            !previewBitmap.isRecycled
+        ) {
+            previewBitmap.recycle()
+        }
+
+        filterOriginalBitmap = null
+        filterPreviewBitmap = null
+        filterType = FilterType.ORIGINAL
+        isFilterMode = false
+
+        resetGestureState()
+        onFilterModeChanged?.invoke(false)
+        invalidate()
+        Log.d(TAG, "Filter session cancelled")
+    }
+
+    /** Clears only temporary filter-session state. */
+    private fun clearFilterSession() {
+        val originalBitmap = filterOriginalBitmap
+        val previewBitmap = filterPreviewBitmap
+
+        if (
+            previewBitmap != null &&
+            previewBitmap !== originalBitmap &&
+            !previewBitmap.isRecycled
+        ) {
+            previewBitmap.recycle()
+        }
+
+        filterOriginalBitmap = null
+        filterPreviewBitmap = null
+        filterType = FilterType.ORIGINAL
+        isFilterMode = false
+    }
+
+    // =========================================================================
+    // ADJUSTMENT SESSION - PHASE 7.1
+    // =========================================================================
+
+    /** True while the temporary adjustment session is active. */
+    private var isAdjustmentMode = false
+
+    /** True while the temporary filter session is active. */
+    private var isFilterMode = false
+
+    /** Bitmap captured when Filter Mode starts. */
+    private var filterOriginalBitmap: Bitmap? = null
+
+    /** Bitmap currently displayed during Filter Mode. */
+    private var filterPreviewBitmap: Bitmap? = null
+
+    /** Currently selected filter. */
+    private var filterType = FilterType.ORIGINAL
+
+    /** Bitmap captured when Adjustment Mode starts. */
+    private var adjustmentOriginalBitmap: Bitmap? = null
+
+    /** Current non-destructive adjustment values. */
+    private var adjustmentState = AdjustmentState()
+
+    /** Bitmap currently displayed during Adjustment Mode. */
+    private var adjustmentPreviewBitmap: Bitmap? = null
+
+    /**
+     * Background worker used for adjustment preview generation.
+     *
+     * Adjustment processing can be expensive for large images, so it must not
+     * run on the main/UI thread while the user is dragging a SeekBar.
+     */
+    private var adjustmentPreviewExecutor: ExecutorService? = null
+
+    /** Identifies the newest adjustment preview request. */
+    @Volatile
+    private var adjustmentPreviewGeneration = 0L
+
+    /** Most recently processed adjustment state. */
+    private var lastProcessedAdjustmentState: AdjustmentState? = null
+
+    /** True when Apply was requested while the newest preview is still processing. */
+    private var pendingAdjustmentApply = false
+
+    /**
+     * Holds only the newest preview request. Intermediate slider states are
+     * replaced instead of being queued, preventing processing backlog during
+     * rapid SeekBar movement.
+     */
+    private val pendingAdjustmentPreview =
+        AtomicReference<AdjustmentPreviewRequest?>(null)
+
+    /** Ensures only one preview worker is active at a time. */
+    private val adjustmentPreviewWorkerRunning =
+        AtomicBoolean(false)
+
+    private data class AdjustmentPreviewRequest(
+        val source: Bitmap,
+        val state: AdjustmentState,
+        val generation: Long
+    )
+
     /** Last touch position in original image coordinates while moving the crop. */
     private val lastCropTouchImage = PointF()
 
@@ -277,6 +513,14 @@ class PhotoEditorView @JvmOverloads constructor(
 
     /** Called when temporary rotation mode starts or ends. */
     var onRotationModeChanged:
+            ((Boolean) -> Unit)? = null
+
+    /** Called when temporary adjustment mode starts or ends. */
+    var onAdjustmentModeChanged:
+            ((Boolean) -> Unit)? = null
+
+    /** Called when temporary filter-selection mode starts or ends. */
+    var onFilterModeChanged:
             ((Boolean) -> Unit)? = null
 
     // =========================================================================
@@ -459,6 +703,8 @@ class PhotoEditorView @JvmOverloads constructor(
         clearCropSessionSnapshot()
         clearRotationSessionSnapshot()
         isRotationMode = false
+        clearFilterSession()
+        clearAdjustmentSession()
 
         notifySelectionChanged()
         onCropModeChanged?.invoke(false)
@@ -487,6 +733,7 @@ class PhotoEditorView @JvmOverloads constructor(
         clearCropSessionSnapshot()
         clearRotationSessionSnapshot()
         isRotationMode = false
+        clearAdjustmentSession()
 
         notifySelectionChanged()
         onCropModeChanged?.invoke(false)
@@ -1398,6 +1645,330 @@ class PhotoEditorView @JvmOverloads constructor(
                 exception
             )
         }
+    }
+
+    // =========================================================================
+    // ADJUSTMENT SESSION - PHASE 7.1
+    // =========================================================================
+
+    /**
+     * Starts a temporary non-destructive adjustment session.
+     *
+     * The committed bitmap remains untouched until Apply is pressed.
+     */
+    fun enterAdjustmentMode() {
+
+        if (isAdjustmentMode) {
+            Log.d(TAG, "Adjustment mode ignored: already active")
+            return
+        }
+
+        if (isCropMode || isRotationMode) {
+            Log.d(TAG, "Adjustment mode ignored: another editor mode is active")
+            return
+        }
+
+        val currentBitmap = bitmap
+
+        if (currentBitmap == null) {
+            Log.d(TAG, "Adjustment mode ignored: no image selected")
+            return
+        }
+
+        adjustmentPreviewGeneration++
+        pendingAdjustmentApply = false
+        lastProcessedAdjustmentState = AdjustmentState()
+
+        adjustmentOriginalBitmap = currentBitmap
+        adjustmentState = AdjustmentState()
+        adjustmentPreviewBitmap = currentBitmap
+        isAdjustmentMode = true
+
+        resetGestureState()
+        onAdjustmentModeChanged?.invoke(true)
+        invalidate()
+
+        Log.d(
+            TAG,
+            "Adjustment session started: " +
+                    "bitmap=${currentBitmap.width}x${currentBitmap.height}"
+        )
+    }
+
+    /** Returns true when the temporary adjustment session is active. */
+    fun isAdjustmentMode(): Boolean = isAdjustmentMode
+
+    /** Returns the current adjustment values. */
+    fun getAdjustmentState(): AdjustmentState = adjustmentState
+
+    /**
+     * Updates the temporary adjustment state and schedules a preview refresh.
+     *
+     * Phase 7.8: preview processing is moved off the main/UI thread.
+     * Rapid slider updates are represented by generations so an older, slower
+     * processing request can never overwrite the newest preview.
+     */
+    fun setAdjustmentState(state: AdjustmentState) {
+
+        if (!isAdjustmentMode) {
+            Log.d(TAG, "Adjustment state ignored: adjustment mode is not active")
+            return
+        }
+
+        val source = adjustmentOriginalBitmap ?: bitmap ?: return
+
+        if (state == adjustmentState) {
+            return
+        }
+
+        adjustmentState = state
+        pendingAdjustmentApply = false
+
+        val generation = ++adjustmentPreviewGeneration
+
+        if (state == AdjustmentState()) {
+            pendingAdjustmentPreview.set(null)
+
+            val previousPreview = adjustmentPreviewBitmap
+
+            adjustmentPreviewBitmap = source
+            lastProcessedAdjustmentState = state
+
+            if (
+                previousPreview != null &&
+                previousPreview !== source &&
+                !previousPreview.isRecycled
+            ) {
+                previousPreview.recycle()
+            }
+
+            invalidate()
+            Log.d(TAG, "Adjustment preview reset to original")
+            return
+        }
+
+        pendingAdjustmentPreview.set(
+            AdjustmentPreviewRequest(
+                source = source,
+                state = state,
+                generation = generation
+            )
+        )
+
+        startAdjustmentPreviewWorkerIfNeeded()
+
+        Log.d(
+            TAG,
+            "Adjustment preview scheduled: generation=$generation, state=$state"
+        )
+    }
+
+    /** Starts one worker when there is no worker already processing previews. */
+    private fun startAdjustmentPreviewWorkerIfNeeded() {
+        if (!adjustmentPreviewWorkerRunning.compareAndSet(false, true)) {
+            return
+        }
+
+        getAdjustmentPreviewExecutor().execute {
+            processPendingAdjustmentPreviews()
+        }
+    }
+
+    /**
+     * Processes only the newest pending request.
+     *
+     * If the user moves the slider again while processing is in progress, the
+     * pending request is replaced. This prevents a long queue of obsolete
+     * preview calculations.
+     */
+    private fun processPendingAdjustmentPreviews() {
+        while (true) {
+            val request = pendingAdjustmentPreview.getAndSet(null)
+                ?: break
+
+            val preview = try {
+                ImageAdjustmentProcessor.process(
+                    source = request.source,
+                    state = request.state
+                )
+            } catch (exception: Exception) {
+                Log.e(
+                    TAG,
+                    "Adjustment preview processing failed",
+                    exception
+                )
+                continue
+            }
+
+            post {
+                if (
+                    !isAdjustmentMode ||
+                    request.generation != adjustmentPreviewGeneration
+                ) {
+                    if (
+                        preview !== request.source &&
+                        !preview.isRecycled
+                    ) {
+                        preview.recycle()
+                    }
+                    return@post
+                }
+
+                val previousPreview = adjustmentPreviewBitmap
+
+                adjustmentPreviewBitmap = preview
+                lastProcessedAdjustmentState = request.state
+
+                if (
+                    previousPreview != null &&
+                    previousPreview !== request.source &&
+                    previousPreview !== preview &&
+                    !previousPreview.isRecycled
+                ) {
+                    previousPreview.recycle()
+                }
+
+                invalidate()
+
+                Log.d(
+                    TAG,
+                    "Adjustment preview updated: state=${request.state}"
+                )
+
+                if (
+                    pendingAdjustmentApply &&
+                    lastProcessedAdjustmentState == adjustmentState
+                ) {
+                    pendingAdjustmentApply = false
+                    applyAdjustmentsInternal()
+                }
+            }
+        }
+
+        adjustmentPreviewWorkerRunning.set(false)
+
+        // A new request may have arrived between the last getAndSet() and
+        // clearing the running flag. Start another worker if needed.
+        if (pendingAdjustmentPreview.get() != null) {
+            startAdjustmentPreviewWorkerIfNeeded()
+        }
+    }
+
+    /** Creates the single background worker lazily. */
+    private fun getAdjustmentPreviewExecutor(): ExecutorService {
+        return adjustmentPreviewExecutor ?: Executors.newSingleThreadExecutor { runnable ->
+            Thread(
+                runnable,
+                "PhotoEditor-AdjustmentPreview"
+            ).apply {
+                isDaemon = true
+            }
+        }.also { executor ->
+            adjustmentPreviewExecutor = executor
+        }
+    }
+
+    /** Resets temporary adjustment values while keeping the session active. */
+    fun resetAdjustments() {
+
+        if (!isAdjustmentMode) {
+            Log.d(TAG, "Reset adjustments ignored: adjustment mode is not active")
+            return
+        }
+
+        adjustmentPreviewGeneration++
+        pendingAdjustmentApply = false
+        pendingAdjustmentPreview.set(null)
+
+        val originalBitmap = adjustmentOriginalBitmap
+        val previousPreview = adjustmentPreviewBitmap
+
+        adjustmentState = AdjustmentState()
+        adjustmentPreviewBitmap = originalBitmap
+        lastProcessedAdjustmentState = AdjustmentState()
+
+        if (
+            previousPreview != null &&
+            previousPreview !== originalBitmap &&
+            !previousPreview.isRecycled
+        ) {
+            previousPreview.recycle()
+        }
+
+        invalidate()
+
+        Log.d(TAG, "Adjustments reset")
+    }
+
+    /** Commits the current adjustment preview. */
+    fun applyAdjustments() {
+
+        if (!isAdjustmentMode) {
+            Log.d(TAG, "Apply adjustments ignored: adjustment mode is not active")
+            return
+        }
+
+        if (lastProcessedAdjustmentState != adjustmentState) {
+            pendingAdjustmentApply = true
+            Log.d(
+                TAG,
+                "Apply queued: waiting for latest adjustment preview"
+            )
+            return
+        }
+
+        applyAdjustmentsInternal()
+    }
+
+    /** Commits an adjustment preview after its latest processing is complete. */
+    private fun applyAdjustmentsInternal() {
+        if (!isAdjustmentMode) {
+            return
+        }
+
+        adjustmentPreviewBitmap?.let { bitmap = it }
+
+        clearAdjustmentSession()
+        resetGestureState()
+        onAdjustmentModeChanged?.invoke(false)
+        invalidate()
+
+        Log.d(TAG, "Adjustments applied")
+    }
+
+    /** Discards the temporary preview and restores the session source bitmap. */
+    fun cancelAdjustments() {
+
+        if (!isAdjustmentMode) {
+            Log.d(TAG, "Cancel adjustments ignored: adjustment mode is not active")
+            return
+        }
+
+        adjustmentPreviewGeneration++
+        pendingAdjustmentApply = false
+        pendingAdjustmentPreview.set(null)
+
+        adjustmentOriginalBitmap?.let { bitmap = it }
+
+        clearAdjustmentSession()
+        resetGestureState()
+        onAdjustmentModeChanged?.invoke(false)
+        invalidate()
+
+        Log.d(TAG, "Adjustments cancelled")
+    }
+
+    /** Clears only temporary adjustment-session state. */
+    private fun clearAdjustmentSession() {
+        adjustmentPreviewGeneration++
+        pendingAdjustmentApply = false
+        pendingAdjustmentPreview.set(null)
+
+        adjustmentOriginalBitmap = null
+        adjustmentPreviewBitmap = null
+        adjustmentState = AdjustmentState()
+        lastProcessedAdjustmentState = null
+        isAdjustmentMode = false
     }
 
     // =========================================================================
@@ -3399,7 +3970,11 @@ class PhotoEditorView @JvmOverloads constructor(
         )
 
         val currentBitmap =
-            bitmap ?: return
+            when {
+                isAdjustmentMode -> adjustmentPreviewBitmap
+                isFilterMode -> filterPreviewBitmap
+                else -> bitmap
+            } ?: return
 
         if (
             width <= 0 ||
@@ -4375,6 +4950,21 @@ class PhotoEditorView @JvmOverloads constructor(
     }
 
     // =========================================================================
+    // LIFECYCLE
+    // =========================================================================
+
+    /** Releases the adjustment preview worker when the view leaves the window. */
+    override fun onDetachedFromWindow() {
+        adjustmentPreviewGeneration++
+        pendingAdjustmentPreview.set(null)
+
+        adjustmentPreviewExecutor?.shutdownNow()
+        adjustmentPreviewExecutor = null
+
+        super.onDetachedFromWindow()
+    }
+
+    // =========================================================================
     // TOUCH
     // =========================================================================
 
@@ -4391,6 +4981,17 @@ class PhotoEditorView @JvmOverloads constructor(
         // gestures while it is active so pan, zoom, text movement and element
         // transforms cannot mutate the temporary rotation state.
         if (isRotationMode) {
+            return true
+        }
+
+        // Adjustment mode is controlled by the adjustment toolbar.
+        // Canvas gestures must not mutate the editor during this session.
+        if (isAdjustmentMode) {
+            return true
+        }
+
+        // Filter mode is controlled by the filter toolbar.
+        if (isFilterMode) {
             return true
         }
 
