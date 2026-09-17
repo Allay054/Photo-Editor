@@ -22,6 +22,77 @@
         app:layout_constraintTop_toTopOf="parent" />
 
 
+
+    <!-- ================================================================ -->
+    <!-- LAYER PANEL - PHASE 10.2                                       -->
+    <!-- ================================================================ -->
+    <LinearLayout
+        android:id="@+id/layerPanel"
+        android:layout_width="190dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginBottom="12dp"
+        android:background="#202020"
+        android:elevation="16dp"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/editorToolbar"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Layers"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <Button
+                android:id="@+id/btnLayerClose"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:text="Close"
+                android:textAllCaps="false"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="8dp"
+            android:scrollbars="none">
+            <LinearLayout
+                android:id="@+id/layerListContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Layer order"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp" />
+
+        <Button android:id="@+id/btnLayerBringToFront" android:layout_width="match_parent" android:layout_height="40dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Bring to Front" android:textAllCaps="false" android:textSize="12sp" />
+        <Button android:id="@+id/btnLayerBringForward" android:layout_width="match_parent" android:layout_height="40dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Bring Forward" android:textAllCaps="false" android:textSize="12sp" />
+        <Button android:id="@+id/btnLayerSendBackward" android:layout_width="match_parent" android:layout_height="40dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Send Backward" android:textAllCaps="false" android:textSize="12sp" />
+        <Button android:id="@+id/btnLayerSendToBack" android:layout_width="match_parent" android:layout_height="40dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Send to Back" android:textAllCaps="false" android:textSize="12sp" />
+    </LinearLayout>
+
     <!-- ================================================================ -->
     <!-- BOTTOM EDITOR TOOLBAR                                            -->
     <!-- ================================================================ -->
@@ -1354,6 +1425,20 @@
                     android:textSize="14sp" />
 
 
+                <!-- Layers - Phase 10.2 -->
+                <Button
+                    android:id="@+id/btnLayers"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Layers"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
                 <!-- Filters -->
 
                 <Button
@@ -1375,5 +1460,3 @@
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
-
-

@@ -2211,6 +2211,92 @@ class PhotoEditorView @JvmOverloads constructor(
         return elements.indexOf(element)
     }
 
+    /**
+     * Selects an existing element by its layer index.
+     *
+     * Layer index follows the existing elements list:
+     * index 0 is the bottom-most layer and the last index is the top-most layer.
+     *
+     * Selection goes through the existing selection pipeline so existing
+     * selection callbacks, handles, and UI state remain synchronized.
+     */
+    fun selectLayer(index: Int): Boolean {
+        val element = elements.getOrNull(index) ?: return false
+
+        selectElement(element)
+        return true
+    }
+
+    /**
+     * Moves the selected element to the top-most layer.
+     *
+     * Layer order is represented directly by the existing elements list:
+     * index 0 is the bottom-most layer and the last index is the top-most.
+     * The selected element remains selected after reordering.
+     */
+    fun bringSelectedElementToFront(): Boolean {
+        val element = selectedElement ?: return false
+        val currentIndex = elements.indexOf(element)
+        if (currentIndex < 0 || currentIndex == elements.lastIndex) {
+            return false
+        }
+
+        elements.removeAt(currentIndex)
+        elements.add(element)
+        invalidate()
+        return true
+    }
+
+    /**
+     * Moves the selected element to the bottom-most layer.
+     */
+    fun sendSelectedElementToBack(): Boolean {
+        val element = selectedElement ?: return false
+        val currentIndex = elements.indexOf(element)
+        if (currentIndex <= 0) {
+            return false
+        }
+
+        elements.removeAt(currentIndex)
+        elements.add(0, element)
+        invalidate()
+        return true
+    }
+
+    /**
+     * Moves the selected element up by one layer.
+     */
+    fun bringSelectedElementForward(): Boolean {
+        val element = selectedElement ?: return false
+        val currentIndex = elements.indexOf(element)
+        if (currentIndex < 0 || currentIndex == elements.lastIndex) {
+            return false
+        }
+
+        elements[currentIndex] = elements[currentIndex + 1].also {
+            elements[currentIndex + 1] = element
+        }
+        invalidate()
+        return true
+    }
+
+    /**
+     * Moves the selected element down by one layer.
+     */
+    fun sendSelectedElementBackward(): Boolean {
+        val element = selectedElement ?: return false
+        val currentIndex = elements.indexOf(element)
+        if (currentIndex <= 0) {
+            return false
+        }
+
+        elements[currentIndex] = elements[currentIndex - 1].also {
+            elements[currentIndex - 1] = element
+        }
+        invalidate()
+        return true
+    }
+
     fun clearElements() {
         clearAnnotationHistory()
         elements.forEach {
@@ -4002,6 +4088,44 @@ class PhotoEditorView @JvmOverloads constructor(
             selectedAnnotation.isSelected
         ) {
             drawAnnotationSelectionHandles(canvas, selectedAnnotation)
+        }
+
+        // -----------------------------------------------------------------
+        // SELECTED TEXT / SHAPE HANDLES
+        // -----------------------------------------------------------------
+        // Keep the existing Phase 8 selection/transform UI visible while
+        // preserving the Phase 9 annotation selection UI above.
+        val selectedText = selectedElement as? TextElement
+        if (selectedText != null && selectedText.isSelected) {
+            val bounds = selectedText.getBounds()
+
+            val topLeft = imageToScreen(bounds.left, bounds.top) ?: PointF()
+            val topRight = imageToScreen(bounds.right, bounds.top) ?: PointF()
+            val bottomLeft = imageToScreen(bounds.left, bounds.bottom) ?: PointF()
+            val bottomRight = imageToScreen(bounds.right, bounds.bottom) ?: PointF()
+
+            val rotationHandle = getRotationHandlePosition(selectedText)
+            val resizeHandle = getResizeHandlePosition(selectedText)
+
+            editorRenderer.drawTextSelectionHandles(
+                canvas = canvas,
+                topLeft = topLeft,
+                topRight = topRight,
+                bottomLeft = bottomLeft,
+                bottomRight = bottomRight,
+                rotationHandle = rotationHandle,
+                resizeHandle = resizeHandle
+            )
+
+            drawTextDeleteButton(
+                canvas = canvas,
+                textElement = selectedText
+            )
+        }
+
+        val selectedShape = selectedElement as? ShapeElement
+        if (selectedShape != null && selectedShape.isSelected) {
+            drawShapeSelectionHandles(canvas, selectedShape)
         }
 
         /*

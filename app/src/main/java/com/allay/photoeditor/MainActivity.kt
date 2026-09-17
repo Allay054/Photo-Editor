@@ -224,6 +224,19 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var mainToolsScroll: View
 
+    // -------------------------------------------------------------------------
+    // LAYER TOOLS - PHASE 10.2
+    // -------------------------------------------------------------------------
+
+    private lateinit var btnLayers: Button
+    private lateinit var layerPanel: View
+    private lateinit var layerListContainer: LinearLayout
+    private lateinit var btnLayerBringToFront: Button
+    private lateinit var btnLayerBringForward: Button
+    private lateinit var btnLayerSendBackward: Button
+    private lateinit var btnLayerSendToBack: Button
+    private lateinit var btnLayerClose: Button
+
     private lateinit var rotationToolsScroll: View
     private lateinit var btnRotationCancel: Button
     private lateinit var btnRotationApply: Button
@@ -422,6 +435,16 @@ class MainActivity : AppCompatActivity() {
             )
 
         mainToolsScroll = findViewById(R.id.mainToolsScroll)
+
+        btnLayers = findViewById(R.id.btnLayers)
+        layerPanel = findViewById(R.id.layerPanel)
+        layerListContainer = findViewById(R.id.layerListContainer)
+        btnLayerBringToFront = findViewById(R.id.btnLayerBringToFront)
+        btnLayerBringForward = findViewById(R.id.btnLayerBringForward)
+        btnLayerSendBackward = findViewById(R.id.btnLayerSendBackward)
+        btnLayerSendToBack = findViewById(R.id.btnLayerSendToBack)
+        btnLayerClose = findViewById(R.id.btnLayerClose)
+
         rotationToolsScroll = findViewById(R.id.rotationToolsScroll)
         btnRotationCancel = findViewById(R.id.btnRotationCancel)
         btnRotationApply = findViewById(R.id.btnRotationApply)
@@ -497,6 +520,9 @@ class MainActivity : AppCompatActivity() {
         // ---------------------------------------------------------------------
 
         setupListeners()
+
+        layerPanel.visibility = View.GONE
+        updateLayerPanel()
 
         updateCropTools(false)
         adjustmentToolsScroll.visibility = View.GONE
@@ -580,6 +606,48 @@ class MainActivity : AppCompatActivity() {
     // -------------------------------------------------------------------------
 
     private fun setupListeners() {
+
+        // ---------------------------------------------------------------------
+        // LAYERS - PHASE 10.2
+        // ---------------------------------------------------------------------
+
+        btnLayers.setOnClickListener {
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(this, "Please select an image first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode() ||
+                photoEditorView.isRotationMode() ||
+                photoEditorView.isAdjustmentMode() ||
+                photoEditorView.isFilterMode() ||
+                photoEditorView.isFreehandMode()
+            ) {
+                Toast.makeText(this, "Finish or cancel the current edit mode first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (layerPanel.visibility == View.VISIBLE) {
+                closeLayerPanel()
+            } else {
+                updateLayerPanel()
+                layerPanel.visibility = View.VISIBLE
+            }
+        }
+
+        btnLayerBringToFront.setOnClickListener {
+            reorderSelectedLayer { photoEditorView.bringSelectedElementToFront() }
+        }
+        btnLayerBringForward.setOnClickListener {
+            reorderSelectedLayer { photoEditorView.bringSelectedElementForward() }
+        }
+        btnLayerSendBackward.setOnClickListener {
+            reorderSelectedLayer { photoEditorView.sendSelectedElementBackward() }
+        }
+        btnLayerSendToBack.setOnClickListener {
+            reorderSelectedLayer { photoEditorView.sendSelectedElementToBack() }
+        }
+        btnLayerClose.setOnClickListener { closeLayerPanel() }
 
         // ---------------------------------------------------------------------
         // SELECT IMAGE
@@ -1700,6 +1768,7 @@ class MainActivity : AppCompatActivity() {
             )
 
             updateDeleteButton()
+            updateLayerPanel()
             updateTextEditButton(element)
             updateTextColorButton(element)
             updateTextSizeButton(element)
@@ -1740,6 +1809,7 @@ class MainActivity : AppCompatActivity() {
 
         photoEditorView.onFilterModeChanged = { isFilterMode ->
             Log.d(TAG, "Filter mode changed: $isFilterMode")
+            closeLayerPanel()
             filterToolsScroll.visibility = if (isFilterMode) View.VISIBLE else View.GONE
             annotationToolsScroll.visibility = View.GONE
             mainToolsScroll.visibility = if (isFilterMode) View.GONE else View.VISIBLE
@@ -1780,6 +1850,7 @@ class MainActivity : AppCompatActivity() {
 
         photoEditorView.onRotationModeChanged = { isRotationMode ->
             Log.d(TAG, "Rotation mode changed: $isRotationMode")
+            closeLayerPanel()
             updateRotationTools(isRotationMode)
 
             annotationToolsScroll.visibility = View.GONE
@@ -1822,6 +1893,7 @@ class MainActivity : AppCompatActivity() {
         // ---------------------------------------------------------------------
         photoEditorView.onAdjustmentModeChanged = { isAdjustmentMode ->
             Log.d(TAG, "Adjustment mode changed: $isAdjustmentMode")
+            closeLayerPanel()
 
             if (isAdjustmentMode) {
                 updateAdjustmentControls(photoEditorView.getAdjustmentState())
@@ -2328,6 +2400,74 @@ class MainActivity : AppCompatActivity() {
 
         btnAnnotationUndo.isEnabled = canUndo
         btnAnnotationRedo.isEnabled = canRedo
+    }
+
+    // -------------------------------------------------------------------------
+    // LAYER PANEL - PHASE 10.2
+    // -------------------------------------------------------------------------
+
+    private fun closeLayerPanel() {
+        layerPanel.visibility = View.GONE
+    }
+
+    private fun reorderSelectedLayer(action: () -> Boolean) {
+        if (photoEditorView.getSelectedElement() == null) {
+            Toast.makeText(this, "Please select a layer first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        action()
+        updateLayerPanel()
+    }
+
+    private fun updateLayerPanel() {
+        if (!::layerListContainer.isInitialized) return
+
+        layerListContainer.removeAllViews()
+        val layerCount = photoEditorView.getLayerCount()
+        val selectedElement = photoEditorView.getSelectedElement()
+
+        btnLayerBringToFront.isEnabled = selectedElement != null
+        btnLayerBringForward.isEnabled = selectedElement != null
+        btnLayerSendBackward.isEnabled = selectedElement != null
+        btnLayerSendToBack.isEnabled = selectedElement != null
+
+        if (layerCount == 0) {
+            layerListContainer.addView(TextView(this).apply {
+                text = "No layers yet"
+                textSize = 14f
+                setPadding(16, 16, 16, 16)
+            })
+            return
+        }
+
+        // Display top-most first. The editor's actual list remains bottom -> top.
+        for (index in layerCount - 1 downTo 0) {
+            val element = photoEditorView.getLayer(index) ?: continue
+            val selected = element === selectedElement
+            val typeName = element::class.simpleName ?: "Element"
+            val button = Button(this).apply {
+                text = if (selected) {
+                    "✓ Layer ${index + 1} • $typeName"
+                } else {
+                    "Layer ${index + 1} • $typeName"
+                }
+
+                isAllCaps = false
+                textSize = 13f
+                minHeight = 44
+                setPadding(10, 0, 10, 0)
+
+                setOnClickListener {
+                    if (photoEditorView.selectLayer(index)) {
+                        updateLayerPanel()
+                    }
+                }
+            }
+            layerListContainer.addView(button, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = 6 })
+        }
     }
 
     // -------------------------------------------------------------------------
