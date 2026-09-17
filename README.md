@@ -499,21 +499,82 @@ The refactor was performed incrementally and regression-tested after each major 
 
 # Phase 8 — Shapes
 
-* [ ] Rectangle
-* [ ] Circle
-* [ ] Line
-* [ ] Arrow
-* [ ] Shape color
-* [ ] Shape size
-* [ ] Shape movement
-* [ ] Shape resizing
-* [ ] Shape rotation
-* [ ] Shape deletion
+Phase 8 adds reusable shape editor elements with selection, movement, resizing, rotation, styling, and deletion while preserving all previously completed editor functionality.
+
+## 8.1 — Shape Foundation
+
+* [x] Shape element model
+* [x] Shape type definitions
+* [x] Shape controller
+* [x] Default shape configuration
+
+## 8.2 — Basic Shape Rendering
+
+* [x] Rectangle
+* [x] Circle
+* [x] Rounded rectangle
+* [x] Triangle
+* [x] Shape rendering through editor renderer
+
+## 8.3 — Line, Arrow & Pointer
+
+* [x] Line
+* [x] Arrow
+* [x] Pointer
+* [x] Shape-specific rendering
+
+## 8.4 — Shape Selection & Movement
+
+* [x] Shape selection
+* [x] Selection visualization
+* [x] Shape movement
+* [x] Touch interaction handling
+* [x] Selection state preservation
+
+## 8.5 — Shape Resize & Rotation
+
+* [x] Shape resize handle
+* [x] Shape resizing
+* [x] Rotation handle
+* [x] Shape rotation
+* [x] Handle touch areas
+* [x] Transformation state handling
+
+## 8.6 — Shape Styling
+
+* [x] Shape color
+* [x] Stroke width
+* [x] Fill / outline mode
+* [x] Styling updates for selected shapes
+
+## 8.7 — Shape Toolbar & Editor Integration
+
+* [x] Shape toolbar
+* [x] Shape creation controls
+* [x] Shape styling controls
+* [x] Shape interaction integration
+* [x] Preserve existing editor toolbar behavior
+
+## 8.8 — Shape & Text Deletion
+
+* [x] Shape delete control
+* [x] Text delete control
+* [x] Prominent delete button UI
+* [x] Safe delete hit area
+* [x] Correct delete-handle positioning
+* [x] Preserve text selection and transformation behavior
+
+### Phase 8 Status
+
+**✅ COMPLETED**
 
 ---
 
 # Phase 9 — Annotation
 
+Phase 9 will introduce annotation and drawing capabilities while preserving the existing image, text, shape, crop, transform, filter, and adjustment functionality.
+
+* [ ] Annotation foundation
 * [ ] Freehand drawing
 * [ ] Pen
 * [ ] Highlighter
@@ -522,6 +583,9 @@ The refactor was performed incrementally and regression-tested after each major 
 * [ ] Pixelate
 * [ ] Drawing color
 * [ ] Stroke size
+* [ ] Annotation selection / interaction
+* [ ] Annotation state safety
+* [ ] Annotation toolbar
 
 ---
 
@@ -628,8 +692,8 @@ The refactor was performed incrementally and regression-tested after each major 
 | Phase 5 — Crop                    | ✅ Completed    |
 | Phase 6 — Image Transform         | ✅ Completed    |
 | Phase 7 — Image Adjustments       | ✅ Completed    |
-| Phase 8 — Shapes                  | 🔄 Next         |
-| Phase 9 — Annotation              | ⏳ Planned      |
+| Phase 8 — Shapes                  | ✅ Completed    |
+| Phase 9 — Annotation              | 🔄 Next         |
 | Phase 10 — Layers                 | ⏳ Planned      |
 | Phase 11 — Undo / Redo            | ⏳ Planned      |
 | Phase 12 — Save / Export          | ⏳ Planned      |
@@ -816,25 +880,28 @@ Testing includes:
 
 # 📌 Current Development Checkpoint
 
-**Phase 7 — Image Adjustments: ✅ COMPLETED**
+**Phase 8 — Shapes: ✅ COMPLETED**
 
-Phase 7 is complete, including:
+Phase 8 is complete, including:
 
-* Image adjustment processing foundation
-* Filter mode and basic filters
-* Warm / Cool filters
-* Brightness
-* Contrast
-* Saturation
-* Exposure
-* Temperature
-* Highlights
-* Shadows
-* Combined adjustment processing
-* Processing efficiency improvements
-* Background preview processing
-* Adjustment state safety
-* Adjustment UX
+* Shape foundation
+* Rectangle
+* Circle
+* Rounded rectangle
+* Triangle
+* Line
+* Arrow
+* Pointer
+* Shape selection and movement
+* Shape resizing
+* Shape rotation
+* Shape styling
+* Shape toolbar integration
+* Shape deletion
+* Text deletion control
+* Delete-handle positioning and interaction safety
+
+Previously completed image, text, crop, transform, filter, and adjustment functionality remains preserved.
 
 The editor architecture has also completed its incremental refactor:
 
@@ -847,9 +914,9 @@ The editor architecture has also completed its incremental refactor:
 
 The next development task is:
 
-> **Phase 8 — Shapes**
+> **Phase 9 — Annotation**
 
-Phase 8 will introduce reusable shape editor elements while preserving the existing image, text, crop, transform, filter, and adjustment functionality.
+Phase 9 will introduce annotation and drawing capabilities while preserving the existing image, text, shape, crop, transform, filter, and adjustment functionality.
 
 ---
 
@@ -885,6 +952,14 @@ Phase 7.8 - Background Preview Processing
 Phase 7.9 - Adjustment State Safety
 Phase 7.10 - Adjustment UX
 Architecture Refactor - Controllers + Renderer
+Phase 8.1 - Shape Foundation
+Phase 8.2 - Basic Shape Rendering
+Phase 8.3 - Line, Arrow & Pointer
+Phase 8.4 - Shape Selection & Movement
+Phase 8.5 - Shape Resize & Rotation
+Phase 8.6 - Shape Styling
+Phase 8.7 - Shape Toolbar & Editor Integration
+Phase 8.8 - Shape & Text Deletion
 ```
 
 This makes it easier to track development progress and safely return to a previous stable implementation.
@@ -893,11 +968,11 @@ This makes it easier to track development progress and safely return to a previo
 
 # 📈 Project Status
 
-**Current Phase:** Phase 7 — Image Adjustments
+**Current Phase:** Phase 8 — Shapes: ✅ COMPLETED
 
-**Current Task:** Phase 8 — Shapes
+**Current Task:** Phase 9 — Annotation
 
-**Completed Phases:** 1–7
+**Completed Phases:** 1–8
 
 **Crop Status:** ✅ Completed
 
@@ -905,9 +980,13 @@ This makes it easier to track development progress and safely return to a previo
 
 **Adjustment Status:** ✅ Completed through Phase 7.10
 
+**Shape Status:** ✅ Completed through Phase 8.8
+
 **Architecture Refactor:** ✅ Controllers, gesture handling, and renderer extracted
 
-**Next Milestone:** Phase 8 — Shapes
+**PhotoEditorView Optimization:** ✅ Completed through Optimization 6
+
+**Next Milestone:** Phase 9 — Annotation
 
 ---
 
