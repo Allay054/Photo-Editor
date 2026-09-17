@@ -2411,12 +2411,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun reorderSelectedLayer(action: () -> Boolean) {
-        if (photoEditorView.getSelectedElement() == null) {
-            Toast.makeText(this, "Please select a layer first", Toast.LENGTH_SHORT).show()
+        val selectedElement = photoEditorView.getSelectedElement()
+
+        if (selectedElement == null) {
+            Toast.makeText(
+                this,
+                "Please select a layer first",
+                Toast.LENGTH_SHORT
+            ).show()
             return
         }
-        action()
+
+        val oldIndex = photoEditorView.getLayerIndex(selectedElement)
+        val changed = action()
+        val newIndex = photoEditorView.getLayerIndex(selectedElement)
+
+        Log.d(
+            TAG,
+            "Layer reordered: oldIndex=$oldIndex, newIndex=$newIndex, changed=$changed"
+        )
+
         updateLayerPanel()
+
+        if (changed) {
+            Toast.makeText(
+                this,
+                "Layer order updated",
+                Toast.LENGTH_SHORT
+            ).show()
+        } else {
+            Toast.makeText(
+                this,
+                "Layer is already at that position",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     private fun updateLayerPanel() {
@@ -2446,21 +2475,13 @@ class MainActivity : AppCompatActivity() {
             val selected = element === selectedElement
             val typeName = element::class.simpleName ?: "Element"
             val button = Button(this).apply {
-                text = if (selected) {
-                    "✓ Layer ${index + 1} • $typeName"
-                } else {
-                    "Layer ${index + 1} • $typeName"
-                }
-
+                text = if (selected) "✓ Layer ${index + 1} • $typeName" else "Layer ${index + 1} • $typeName"
                 isAllCaps = false
                 textSize = 13f
                 minHeight = 44
                 setPadding(10, 0, 10, 0)
-
                 setOnClickListener {
-                    if (photoEditorView.selectLayer(index)) {
-                        updateLayerPanel()
-                    }
+                    if (photoEditorView.selectLayer(index)) updateLayerPanel()
                 }
             }
             layerListContainer.addView(button, LinearLayout.LayoutParams(
