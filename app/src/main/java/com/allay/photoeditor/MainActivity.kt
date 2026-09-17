@@ -3,6 +3,7 @@ package com.allay.photoeditor
 import android.app.AlertDialog
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.content.res.ColorStateList
 import android.graphics.PointF
 import android.net.Uri
 import android.os.Bundle
@@ -26,7 +27,9 @@ import com.allay.photoeditor.model.ShapeElement
 import com.allay.photoeditor.model.ShapeType
 import com.allay.photoeditor.model.TextElement
 import com.allay.photoeditor.editor.shape.ShapeController
+import com.allay.photoeditor.editor.annotation.AnnotationController
 import com.allay.photoeditor.utils.ColorPickerDialog
+import com.allay.photoeditor.utils.StrokeWidthPickerDialog
 
 
 private fun TextElement.TextFont.displayName(): String =
@@ -174,6 +177,25 @@ class MainActivity : AppCompatActivity() {
     // FILTER TOOLS - PHASE 7.2
     // -------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------
+    // ANNOTATION TOOLS - PHASE 9.2
+    // -------------------------------------------------------------------------
+
+    private lateinit var btnAnnotation: Button
+    private lateinit var annotationToolsScroll: View
+    private lateinit var btnAnnotationFreehand: Button
+    private lateinit var btnAnnotationPen: Button
+    private lateinit var btnAnnotationHighlighter: Button
+    private lateinit var btnAnnotationEraser: Button
+    private lateinit var btnAnnotationBlur: Button
+    private lateinit var btnAnnotationPixelate: Button
+    private lateinit var btnAnnotationUndo: Button
+    private lateinit var btnAnnotationRedo: Button
+    private lateinit var btnAnnotationCancel: Button
+    private lateinit var btnAnnotationColor: Button
+    private lateinit var btnAnnotationStrokeSize: Button
+    private lateinit var btnAnnotationApply: Button
+
     private lateinit var btnFilters: Button
     private lateinit var filterToolsScroll: View
     private lateinit var btnFilterOriginal: Button
@@ -263,6 +285,8 @@ class MainActivity : AppCompatActivity() {
                 "Selected image URI: $uri"
             )
 
+            photoEditorView.exitFreehandMode()
+            annotationToolsScroll.visibility = View.GONE
             loadImage(uri)
         }
 
@@ -361,6 +385,21 @@ class MainActivity : AppCompatActivity() {
         btnFilterCool = findViewById(R.id.btnFilterCool)
         btnFilterCancel = findViewById(R.id.btnFilterCancel)
         btnFilterApply = findViewById(R.id.btnFilterApply)
+
+        btnAnnotation = findViewById(R.id.btnAnnotation)
+        annotationToolsScroll = findViewById(R.id.annotationToolsScroll)
+        btnAnnotationFreehand = findViewById(R.id.btnAnnotationFreehand)
+        btnAnnotationPen = findViewById(R.id.btnAnnotationPen)
+        btnAnnotationHighlighter = findViewById(R.id.btnAnnotationHighlighter)
+        btnAnnotationEraser = findViewById(R.id.btnAnnotationEraser)
+        btnAnnotationBlur = findViewById(R.id.btnAnnotationBlur)
+        btnAnnotationPixelate = findViewById(R.id.btnAnnotationPixelate)
+        btnAnnotationUndo = findViewById(R.id.btnAnnotationUndo)
+        btnAnnotationRedo = findViewById(R.id.btnAnnotationRedo)
+        btnAnnotationCancel = findViewById(R.id.btnAnnotationCancel)
+        btnAnnotationColor = findViewById(R.id.btnAnnotationColor)
+        btnAnnotationStrokeSize = findViewById(R.id.btnAnnotationStrokeSize)
+        btnAnnotationApply = findViewById(R.id.btnAnnotationApply)
 
         btnFlipHorizontal =
             findViewById(
@@ -463,6 +502,8 @@ class MainActivity : AppCompatActivity() {
         adjustmentToolsScroll.visibility = View.GONE
         filterToolsScroll.visibility = View.GONE
         shapeToolsScroll.visibility = View.GONE
+        annotationToolsScroll.visibility = View.GONE
+        updateAnnotationHistoryButtons()
         updateDeleteButton()
 
         updateTextEditButton(
@@ -718,6 +759,407 @@ class MainActivity : AppCompatActivity() {
         )
 
         updateAdjustmentControls(photoEditorView.getAdjustmentState())
+
+        // ---------------------------------------------------------------------
+        // ANNOTATION APPEARANCE - PHASE 9.4 / 9.5
+        // ---------------------------------------------------------------------
+
+        fun updateAnnotationColor(color: Int) {
+            // Store the selected color in PhotoEditorView so every newly
+            // created annotation uses the exact color chosen by the user.
+            photoEditorView.setAnnotationColor(color)
+
+            btnAnnotationColor.text = "Color"
+            btnAnnotationColor.backgroundTintList = ColorStateList.valueOf(color)
+
+            val luminance =
+                (0.299f * Color.red(color) +
+                        0.587f * Color.green(color) +
+                        0.114f * Color.blue(color)) / 255f
+
+            btnAnnotationColor.setTextColor(
+                if (luminance > 0.55f) Color.BLACK else Color.WHITE
+            )
+        }
+
+        fun updateAnnotationStrokeWidth(strokeWidth: Float) {
+            // Store the selected size in the same controller that creates the
+            // annotation element. This guarantees new Freehand/Pen strokes
+            // receive the selected width.
+            photoEditorView.setAnnotationStrokeWidth(strokeWidth)
+            btnAnnotationStrokeSize.text = "Size: ${strokeWidth.toInt()}px"
+        }
+
+        btnAnnotationColor.setOnClickListener {
+            Log.d(TAG, "Opening annotation color picker")
+
+            ColorPickerDialog(
+                context = this,
+                initialColor = photoEditorView.getAnnotationColor()
+            ) { selectedColor ->
+                Log.d(TAG, "Selected annotation color: $selectedColor")
+                updateAnnotationColor(selectedColor)
+            }.show()
+        }
+
+        updateAnnotationColor(photoEditorView.getAnnotationColor())
+        updateAnnotationStrokeWidth(photoEditorView.getAnnotationStrokeWidth())
+
+        btnAnnotationStrokeSize.setOnClickListener {
+            val currentSize = photoEditorView.getAnnotationStrokeWidth()
+
+            StrokeWidthPickerDialog(
+                context = this,
+                initialStrokeWidth = currentSize,
+                minStrokeWidth = AnnotationController.MIN_STROKE_WIDTH,
+                maxStrokeWidth = AnnotationController.MAX_STROKE_WIDTH
+            ) { selectedStrokeWidth ->
+                Log.d(
+                    TAG,
+                    "Selected annotation stroke width: $selectedStrokeWidth"
+                )
+                updateAnnotationStrokeWidth(selectedStrokeWidth)
+            }.show()
+        }
+
+        // ---------------------------------------------------------------------
+        // ANNOTATION MODE - PHASE 9.2
+        // ---------------------------------------------------------------------
+
+        btnAnnotation.setOnClickListener {
+            Log.d(TAG, "Annotation button clicked")
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode() ||
+                photoEditorView.isRotationMode() ||
+                photoEditorView.isAdjustmentMode() ||
+                filterToolsScroll.visibility == View.VISIBLE
+            ) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel the current edit mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (annotationToolsScroll.visibility == View.VISIBLE) {
+                photoEditorView.exitFreehandMode()
+                annotationToolsScroll.visibility = View.GONE
+                mainToolsScroll.visibility = View.VISIBLE
+            } else {
+                photoEditorView.enterAnnotationSelectionMode()
+                annotationToolsScroll.visibility = View.VISIBLE
+                mainToolsScroll.visibility = View.GONE
+            }
+        }
+
+        btnAnnotationFreehand.setOnClickListener {
+            Log.d(TAG, "Freehand annotation selected")
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode() ||
+                photoEditorView.isRotationMode() ||
+                photoEditorView.isAdjustmentMode() ||
+                filterToolsScroll.visibility == View.VISIBLE
+            ) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel the current edit mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.enterFreehandMode()) {
+                annotationToolsScroll.visibility = View.VISIBLE
+                mainToolsScroll.visibility = View.GONE
+                Toast.makeText(
+                    this,
+                    "Freehand drawing enabled",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        btnAnnotationPen.setOnClickListener {
+            Log.d(TAG, "Pen annotation selected")
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode() ||
+                photoEditorView.isRotationMode() ||
+                photoEditorView.isAdjustmentMode() ||
+                filterToolsScroll.visibility == View.VISIBLE
+            ) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel the current edit mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.enterPenMode()) {
+                annotationToolsScroll.visibility = View.VISIBLE
+                mainToolsScroll.visibility = View.GONE
+                Toast.makeText(
+                    this,
+                    "Pen drawing enabled",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        btnAnnotationHighlighter.setOnClickListener {
+            Log.d(TAG, "Highlighter annotation selected")
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode() ||
+                photoEditorView.isRotationMode() ||
+                photoEditorView.isAdjustmentMode() ||
+                filterToolsScroll.visibility == View.VISIBLE
+            ) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel the current edit mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.enterHighlighterMode()) {
+                annotationToolsScroll.visibility = View.VISIBLE
+                mainToolsScroll.visibility = View.GONE
+                Toast.makeText(
+                    this,
+                    "Highlighter enabled",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        btnAnnotationEraser.setOnClickListener {
+            Log.d(TAG, "Eraser annotation selected")
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode() ||
+                photoEditorView.isRotationMode() ||
+                photoEditorView.isAdjustmentMode() ||
+                filterToolsScroll.visibility == View.VISIBLE
+            ) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel the current edit mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.enterEraserMode()) {
+                annotationToolsScroll.visibility = View.VISIBLE
+                mainToolsScroll.visibility = View.GONE
+                Toast.makeText(
+                    this,
+                    "Eraser enabled",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        btnAnnotationBlur.setOnClickListener {
+            Log.d(TAG, "Blur annotation selected")
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode() ||
+                photoEditorView.isRotationMode() ||
+                photoEditorView.isAdjustmentMode() ||
+                filterToolsScroll.visibility == View.VISIBLE
+            ) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel the current edit mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.enterBlurMode()) {
+                annotationToolsScroll.visibility = View.VISIBLE
+                mainToolsScroll.visibility = View.GONE
+                Toast.makeText(
+                    this,
+                    "Blur enabled",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        btnAnnotationPixelate.setOnClickListener {
+            Log.d(TAG, "Pixelate annotation selected")
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode() ||
+                photoEditorView.isRotationMode() ||
+                photoEditorView.isAdjustmentMode() ||
+                filterToolsScroll.visibility == View.VISIBLE
+            ) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel the current edit mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.enterPixelateMode()) {
+                annotationToolsScroll.visibility = View.VISIBLE
+                mainToolsScroll.visibility = View.GONE
+                Toast.makeText(
+                    this,
+                    "Pixelate enabled",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // ANNOTATION UNDO / REDO - PHASE 9
+        // ---------------------------------------------------------------------
+
+        btnAnnotationUndo.setOnClickListener {
+            Log.d(TAG, "Annotation Undo clicked")
+
+            if (photoEditorView.undoAnnotation()) {
+                Toast.makeText(
+                    this,
+                    "Annotation undone",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+
+            updateAnnotationHistoryButtons()
+        }
+
+        btnAnnotationRedo.setOnClickListener {
+            Log.d(TAG, "Annotation Redo clicked")
+
+            if (photoEditorView.redoAnnotation()) {
+                Toast.makeText(
+                    this,
+                    "Annotation redone",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+
+            updateAnnotationHistoryButtons()
+        }
+
+        btnAnnotationApply.setOnClickListener {
+            Log.d(TAG, "Apply annotation clicked")
+
+            if (photoEditorView.getCurrentBitmap() == null) {
+                Toast.makeText(
+                    this,
+                    "Please select an image first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.isCropMode() ||
+                photoEditorView.isRotationMode() ||
+                photoEditorView.isAdjustmentMode() ||
+                filterToolsScroll.visibility == View.VISIBLE
+            ) {
+                Toast.makeText(
+                    this,
+                    "Finish or cancel the current edit mode first",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.applyAnnotations()) {
+                annotationToolsScroll.visibility = View.GONE
+                mainToolsScroll.visibility = View.VISIBLE
+                updateAnnotationHistoryButtons()
+
+                Toast.makeText(
+                    this,
+                    "Annotations applied",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                Toast.makeText(
+                    this,
+                    "No annotations to apply",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        btnAnnotationCancel.setOnClickListener {
+            Log.d(TAG, "Cancel annotation mode clicked")
+            photoEditorView.exitFreehandMode()
+            annotationToolsScroll.visibility = View.GONE
+            mainToolsScroll.visibility = View.VISIBLE
+        }
 
         // ---------------------------------------------------------------------
         // FILTER MODE - PHASE 7.2
@@ -1274,6 +1716,10 @@ class MainActivity : AppCompatActivity() {
             updateShapeStyleButtons(element)
         }
 
+        photoEditorView.onAnnotationHistoryChanged = {
+            updateAnnotationHistoryButtons()
+        }
+
         // ---------------------------------------------------------------------
 // EDIT TEXT REQUESTED
 // ---------------------------------------------------------------------
@@ -1295,6 +1741,7 @@ class MainActivity : AppCompatActivity() {
         photoEditorView.onFilterModeChanged = { isFilterMode ->
             Log.d(TAG, "Filter mode changed: $isFilterMode")
             filterToolsScroll.visibility = if (isFilterMode) View.VISIBLE else View.GONE
+            annotationToolsScroll.visibility = View.GONE
             mainToolsScroll.visibility = if (isFilterMode) View.GONE else View.VISIBLE
             rotationToolsScroll.visibility = View.GONE
             cropToolsScroll.visibility = View.GONE
@@ -1335,6 +1782,7 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Rotation mode changed: $isRotationMode")
             updateRotationTools(isRotationMode)
 
+            annotationToolsScroll.visibility = View.GONE
             mainToolsScroll.visibility = if (isRotationMode) View.GONE else View.VISIBLE
 
             btnSelectImage.isEnabled = !isRotationMode
@@ -1382,6 +1830,7 @@ class MainActivity : AppCompatActivity() {
             adjustmentToolsScroll.visibility =
                 if (isAdjustmentMode) View.VISIBLE else View.GONE
 
+            annotationToolsScroll.visibility = View.GONE
             mainToolsScroll.visibility =
                 if (isAdjustmentMode) View.GONE else View.VISIBLE
 
@@ -1431,6 +1880,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
             updateCropTools(isCropMode)
+            annotationToolsScroll.visibility = View.GONE
 
             if (isCropMode) {
                 shapeToolsScroll.visibility = View.GONE
@@ -1854,6 +2304,30 @@ class MainActivity : AppCompatActivity() {
          */
 
         updateDeleteButton()
+    }
+
+    // -------------------------------------------------------------------------
+    // ANNOTATION UNDO / REDO
+    // -------------------------------------------------------------------------
+
+    private fun updateAnnotationHistoryButtons() {
+
+        val canUndo =
+            photoEditorView.canUndoAnnotation()
+
+        val canRedo =
+            photoEditorView.canRedoAnnotation()
+
+        // GONE removes unavailable buttons from the toolbar layout,
+        // so they do not reserve horizontal space.
+        btnAnnotationUndo.visibility =
+            if (canUndo) View.VISIBLE else View.GONE
+
+        btnAnnotationRedo.visibility =
+            if (canRedo) View.VISIBLE else View.GONE
+
+        btnAnnotationUndo.isEnabled = canUndo
+        btnAnnotationRedo.isEnabled = canRedo
     }
 
     // -------------------------------------------------------------------------
@@ -2846,6 +3320,4 @@ class MainActivity : AppCompatActivity() {
         btnFilterCool.text =
             if (selectedFilterType == FilterType.COOL) "✓ Cool" else "Cool"
     }
-
-
 }

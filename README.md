@@ -572,20 +572,143 @@ Phase 8 adds reusable shape editor elements with selection, movement, resizing, 
 
 # Phase 9 — Annotation
 
-Phase 9 will introduce annotation and drawing capabilities while preserving the existing image, text, shape, crop, transform, filter, and adjustment functionality.
+Phase 9 adds annotation and drawing capabilities while preserving the existing image, text, shape, crop, transform, filter, and adjustment functionality.
 
-* [ ] Annotation foundation
-* [ ] Freehand drawing
-* [ ] Pen
-* [ ] Highlighter
-* [ ] Eraser
-* [ ] Blur
-* [ ] Pixelate
-* [ ] Drawing color
-* [ ] Stroke size
-* [ ] Annotation selection / interaction
-* [ ] Annotation state safety
-* [ ] Annotation toolbar
+## 9.1 — Annotation Foundation
+
+* [x] Annotation element model
+* [x] Annotation type definitions
+* [x] Annotation controller
+* [x] Annotation state management
+
+## 9.2 — Freehand Drawing
+
+* [x] Freehand drawing mode
+* [x] Freehand path creation
+* [x] Image-space coordinate handling
+* [x] Freehand annotation rendering
+* [x] Freehand movement
+* [x] Freehand selection
+
+## 9.3 — Pen
+
+* [x] Pen annotation
+* [x] Pen rendering
+* [x] Pen movement
+* [x] Pen selection
+
+## 9.4 — Annotation Color
+
+* [x] Color picker
+* [x] Annotation color selection
+* [x] Per-annotation color preservation
+* [x] Pixelate color/tint support
+
+## 9.5 — Annotation Stroke Size
+
+* [x] Stroke size picker
+* [x] Minimum / maximum stroke width validation
+* [x] Per-annotation stroke width preservation
+* [x] Live stroke-size preview
+
+## 9.6 — Highlighter
+
+* [x] Highlighter annotation
+* [x] Transparent highlighter rendering
+* [x] Highlighter color support
+* [x] Highlighter movement and selection
+
+## 9.7 — Eraser
+
+* [x] Eraser mode
+* [x] Path erasing
+* [x] Eraser cursor preview
+* [x] Safe eraser gesture handling
+* [x] Eraser history support
+
+## 9.8 — Blur
+
+* [x] Blur annotation
+* [x] Localized blur rendering
+* [x] Blur bitmap caching
+* [x] Blur movement
+* [x] Blur selection / deletion
+
+## 9.9 — Pixelate
+
+* [x] Pixelate annotation
+* [x] Localized pixelation rendering
+* [x] Pixelated bitmap caching
+* [x] Pixelate movement
+* [x] Pixelate selection / deletion
+* [x] Pixelate color/tint support
+* [x] Correct first-render masking
+
+## 9.10 — Annotation Selection & Interaction
+
+* [x] Annotation selection
+* [x] Selection visualization
+* [x] Annotation movement
+* [x] Annotation transformation
+* [x] Delete handle
+* [x] Safe delete hit area
+* [x] Selection state handling
+
+## 9.11 — Annotation History
+
+* [x] Annotation Undo
+* [x] Annotation Redo
+* [x] Gesture-level history operations
+* [x] History button state management
+* [x] History reset on image changes
+* [x] Safe history cancellation
+
+## 9.12 — Annotation Toolbar
+
+* [x] Annotation toolbar
+* [x] Freehand control
+* [x] Pen control
+* [x] Highlighter control
+* [x] Eraser control
+* [x] Blur control
+* [x] Pixelate control
+* [x] Undo / Redo controls
+* [x] Color control
+* [x] Stroke size control
+* [x] Apply control
+* [x] Cancel control
+* [x] Contextual toolbar behavior
+* [x] Prevent conflicting editor operations
+
+## 9.13 — Apply / Commit
+
+* [x] Apply annotation changes
+* [x] Commit Blur into the current bitmap
+* [x] Commit Pixelate into the current bitmap
+* [x] Commit drawing annotations into the current bitmap
+* [x] Preserve existing Text / Shape elements
+* [x] Clear committed annotation elements
+* [x] Reset annotation selection state
+* [x] Reset annotation history after commit
+
+## 9.14 — Annotation State Safety & UX
+
+* [x] Safe mode transitions
+* [x] Cancel annotation mode safely
+* [x] Re-enter annotation mode safely
+* [x] Clear transient gesture state
+* [x] Protect Crop Mode
+* [x] Protect Transform Mode
+* [x] Protect Adjustment Mode
+* [x] Protect Filter Mode
+* [x] Preserve existing editor functionality
+* [x] Annotation interaction regression testing
+
+### Phase 9 Status
+
+**✅ COMPLETED**
+
+> Phase 9 is complete. Annotation now supports Freehand, Pen, Highlighter, Eraser, Blur, and Pixelate with color, stroke-size control, selection, movement, deletion, Undo/Redo, and Apply / Cancel behavior.
 
 ---
 
@@ -693,7 +816,7 @@ Phase 9 will introduce annotation and drawing capabilities while preserving the 
 | Phase 6 — Image Transform         | ✅ Completed    |
 | Phase 7 — Image Adjustments       | ✅ Completed    |
 | Phase 8 — Shapes                  | ✅ Completed    |
-| Phase 9 — Annotation              | 🔄 Next         |
+| Phase 9 — Annotation              | ✅ Completed    |
 | Phase 10 — Layers                 | ⏳ Planned      |
 | Phase 11 — Undo / Redo            | ⏳ Planned      |
 | Phase 12 — Save / Export          | ⏳ Planned      |
@@ -796,6 +919,27 @@ The current editor supports:
 
 ---
 
+# 🖊️ Annotation
+
+* Freehand drawing
+* Pen
+* Highlighter
+* Eraser
+* Blur
+* Pixelate
+* Pixelate color/tint
+* Annotation color picker
+* Stroke size picker
+* Annotation selection
+* Annotation movement
+* Annotation transformation
+* Annotation deletion
+* Annotation Undo / Redo
+* Annotation Apply / Commit
+* Annotation Cancel
+* Contextual annotation toolbar
+* Annotation state safety
+
 # 🏗️ Architecture
 
 The project follows clean and maintainable architecture principles using:
@@ -880,28 +1024,27 @@ Testing includes:
 
 # 📌 Current Development Checkpoint
 
-**Phase 8 — Shapes: ✅ COMPLETED**
+**Phase 9 — Annotation: ✅ COMPLETED**
 
-Phase 8 is complete, including:
+Phase 9 is complete, including:
 
-* Shape foundation
-* Rectangle
-* Circle
-* Rounded rectangle
-* Triangle
-* Line
-* Arrow
-* Pointer
-* Shape selection and movement
-* Shape resizing
-* Shape rotation
-* Shape styling
-* Shape toolbar integration
-* Shape deletion
-* Text deletion control
-* Delete-handle positioning and interaction safety
+* Annotation foundation
+* Freehand drawing
+* Pen
+* Highlighter
+* Eraser
+* Blur
+* Pixelate
+* Annotation color and stroke-size controls
+* Annotation selection and movement
+* Annotation deletion
+* Annotation Undo / Redo
+* Annotation Apply / Commit
+* Annotation Cancel
+* Annotation toolbar integration
+* Annotation state safety
 
-Previously completed image, text, crop, transform, filter, and adjustment functionality remains preserved.
+Previously completed image, text, crop, transform, filter, adjustment, and shape functionality remains preserved.
 
 The editor architecture has also completed its incremental refactor:
 
@@ -914,11 +1057,9 @@ The editor architecture has also completed its incremental refactor:
 
 The next development task is:
 
-> **Phase 9 — Annotation**
+> **Phase 10 — Layers**
 
-Phase 9 will introduce annotation and drawing capabilities while preserving the existing image, text, shape, crop, transform, filter, and adjustment functionality.
-
----
+Phase 10 will introduce layer management and ordering while preserving the existing editor functionality.
 
 # 📦 Git Checkpoints
 
@@ -960,6 +1101,20 @@ Phase 8.5 - Shape Resize & Rotation
 Phase 8.6 - Shape Styling
 Phase 8.7 - Shape Toolbar & Editor Integration
 Phase 8.8 - Shape & Text Deletion
+Phase 9.1 - Annotation Foundation
+Phase 9.2 - Freehand Drawing
+Phase 9.3 - Pen
+Phase 9.4 - Annotation Color
+Phase 9.5 - Annotation Stroke Size
+Phase 9.6 - Highlighter
+Phase 9.7 - Eraser
+Phase 9.8 - Blur
+Phase 9.9 - Pixelate
+Phase 9.10 - Annotation Selection & Interaction
+Phase 9.11 - Annotation History
+Phase 9.12 - Annotation Toolbar
+Phase 9.13 - Apply / Commit
+Phase 9.14 - Annotation State Safety & UX
 ```
 
 This makes it easier to track development progress and safely return to a previous stable implementation.
@@ -968,11 +1123,11 @@ This makes it easier to track development progress and safely return to a previo
 
 # 📈 Project Status
 
-**Current Phase:** Phase 8 — Shapes: ✅ COMPLETED
+**Current Phase:** Phase 9 — Annotation: ✅ COMPLETED
 
-**Current Task:** Phase 9 — Annotation
+**Current Task:** Phase 9 completed and ready for Git checkpoint
 
-**Completed Phases:** 1–8
+**Completed Phases:** 1–9
 
 **Crop Status:** ✅ Completed
 
@@ -982,13 +1137,13 @@ This makes it easier to track development progress and safely return to a previo
 
 **Shape Status:** ✅ Completed through Phase 8.8
 
+**Annotation Status:** ✅ Completed through Phase 9.14
+
 **Architecture Refactor:** ✅ Controllers, gesture handling, and renderer extracted
 
 **PhotoEditorView Optimization:** ✅ Completed through Optimization 6
 
-**Next Milestone:** Phase 9 — Annotation
-
----
+**Next Milestone:** Phase 10 — Layers
 
 ## 🎯 Development Philosophy
 

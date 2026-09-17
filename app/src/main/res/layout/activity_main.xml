@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<androidx.constraintlayout.widget.ConstraintLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/main"
     android:layout_width="match_parent"
@@ -914,17 +913,298 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal">
 
-                <Button android:id="@+id/btnShapeRectangle" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Rectangle" android:textAllCaps="false" android:textSize="14sp" />
-                <Button android:id="@+id/btnShapeCircle" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Circle" android:textAllCaps="false" android:textSize="14sp" />
-                <Button android:id="@+id/btnShapeRoundedRectangle" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Rounded" android:textAllCaps="false" android:textSize="14sp" />
-                <Button android:id="@+id/btnShapeTriangle" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Triangle" android:textAllCaps="false" android:textSize="14sp" />
-                <Button android:id="@+id/btnShapeLine" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Line" android:textAllCaps="false" android:textSize="14sp" />
-                <Button android:id="@+id/btnShapeArrow" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Arrow" android:textAllCaps="false" android:textSize="14sp" />
-                <Button android:id="@+id/btnShapePointer" android:layout_width="wrap_content" android:layout_height="44dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Pointer" android:textAllCaps="false" android:textSize="14sp" />
-                <Button android:id="@+id/btnShapeColor" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Color" android:textAllCaps="false" android:textSize="14sp" android:visibility="gone" />
-                <Button android:id="@+id/btnShapeStrokeWidth" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginEnd="6dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Stroke" android:textAllCaps="false" android:textSize="14sp" android:visibility="gone" />
-                <Button android:id="@+id/btnShapeFill" android:layout_width="wrap_content" android:layout_height="44dp" android:minWidth="0dp" android:minHeight="0dp" android:text="Fill: Off" android:textAllCaps="false" android:textSize="14sp" android:visibility="gone" />
+                <Button
+                    android:id="@+id/btnShapeRectangle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="Rectangle"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnShapeCircle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="Circle"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnShapeRoundedRectangle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="Rounded"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnShapeTriangle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="Triangle"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnShapeLine"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="Line"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnShapeArrow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="Arrow"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnShapePointer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="Pointer"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnShapeColor"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="Color"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnShapeStrokeWidth"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="Stroke"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnShapeFill"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="Fill: Off"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
             </LinearLayout>
+        </HorizontalScrollView>
+
+
+        <!-- ============================================================ -->
+        <!-- ANNOTATION TOOLS - PHASE 9.4 -->
+        <!-- ============================================================ -->
+
+        <HorizontalScrollView
+            android:id="@+id/annotationToolsScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:fillViewport="false"
+            android:scrollbars="none"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnAnnotationFreehand"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Freehand"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnAnnotationPen"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Pen"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnAnnotationHighlighter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Highlighter"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnAnnotationEraser"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Eraser"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnAnnotationPixelate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Pixelate"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnAnnotationBlur"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Blur"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnAnnotationUndo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Undo"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnAnnotationRedo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Redo"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnAnnotationColor"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Color"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnAnnotationStrokeSize"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Size: 24px"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnAnnotationApply"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:text="Apply"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnAnnotationCancel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Cancel"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+            </LinearLayout>
+
         </HorizontalScrollView>
 
 
@@ -1059,6 +1339,21 @@
                     android:textSize="14sp" />
 
 
+                <!-- Annotation -->
+
+                <Button
+                    android:id="@+id/btnAnnotation"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Annotation"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+
                 <!-- Filters -->
 
                 <Button
@@ -1080,3 +1375,5 @@
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
+
+

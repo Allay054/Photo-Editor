@@ -1,11 +1,15 @@
 package com.allay.photoeditor.editor
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.util.Log
@@ -21,7 +25,11 @@ import com.allay.photoeditor.model.TextElement
 import com.allay.photoeditor.model.ShapeElement
 import com.allay.photoeditor.model.ShapeType
 import com.allay.photoeditor.editor.shape.ShapeController
+import com.allay.photoeditor.editor.annotation.AnnotationController
+import com.allay.photoeditor.model.AnnotationElement
+import com.allay.photoeditor.model.AnnotationType
 import com.allay.photoeditor.editor.adjustment.AdjustmentController
+import com.allay.photoeditor.editor.annotation.AnnotationHistoryController
 import com.allay.photoeditor.editor.crop.CropController
 import com.allay.photoeditor.editor.drawing.EditorRenderer
 import com.allay.photoeditor.editor.transform.TransformController
@@ -56,6 +64,10 @@ class PhotoEditorView @JvmOverloads constructor(
         private const val TEXT_DELETE_HANDLE_DISTANCE = 56f
         private const val TEXT_DELETE_BUTTON_RADIUS = 25f
         private const val TEXT_DELETE_BUTTON_TOUCH_RADIUS = 36f
+        private const val ANNOTATION_DELETE_HANDLE_DISTANCE = 44f
+        private const val ANNOTATION_DELETE_BUTTON_RADIUS = 28f
+        private const val ANNOTATION_DELETE_BUTTON_TOUCH_RADIUS = 52f
+        private const val ANNOTATION_SELECTION_TOUCH_PADDING = 24f
         // CROP
         // Corner handles have a generous invisible touch target so they are
         // easy to select even when the visible handle is small.
@@ -217,6 +229,99 @@ class PhotoEditorView @JvmOverloads constructor(
     /** Owns creation of editor shapes while PhotoEditorView keeps the common
      * element selection, movement and transform pipeline. */
     private val shapeController = ShapeController()
+
+    /**
+     * Owns annotation tool configuration while PhotoEditorView keeps
+     * the common editor element list and rendering pipeline.
+     */
+    private val annotationController = AnnotationController()
+
+    /**
+     * Undo/Redo history for annotation operations only.
+     *
+     * Text, shapes and other editor elements are intentionally excluded.
+     */
+    private val annotationHistoryController =
+        AnnotationHistoryController()
+
+    /**
+     * Snapshot captured when an annotation gesture starts.
+     *
+     * Used to store one Undo operation per complete drawing/eraser gesture.
+     */
+    private var annotationHistoryBeforeGesture:
+            AnnotationHistoryController.State? = null
+
+    /** True while the freehand annotation tool owns canvas touch input. */
+    private var freehandModeActive = false
+
+    /** Controls whether annotation selection handles are visible. */
+    private var annotationSelectionVisible = false
+
+    /** True only while the eraser owns canvas touch input. */
+    private var eraserModeActive = false
+
+    /** Path currently being created by the active freehand gesture. */
+    private var activeAnnotationPath: Path? = null
+
+    /** Prevents a single tap from creating an empty annotation. */
+    private var activeAnnotationPointCount = 0
+
+    /** Annotation type used by the currently active drawing gesture. */
+    private var activeAnnotationType: AnnotationType = AnnotationType.FREEHAND
+
+    /** Current eraser cursor in screen coordinates while the eraser is active. */
+    private var activeEraserPoint: PointF? = null
+    private var lastEraserImagePoint: PointF? = null
+
+    /** Soft translucent fill for the eraser cursor. */
+    private val eraserPreviewFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+        alpha = 32
+    }
+
+    /** High-contrast outline for the eraser cursor. */
+    private val eraserPreviewPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        color = Color.WHITE
+        alpha = 220
+    }
+
+    /** Cached blurred version of the current base bitmap for blur annotations. */
+    private var blurredBitmap: Bitmap? = null
+    private var blurredBitmapSource: Bitmap? = null
+
+    /** Cached pixelated version of the current base bitmap for pixelate annotations. */
+    private var pixelatedBitmap: Bitmap? = null
+    private var pixelatedBitmapSource: Bitmap? = null
+
+    private val blurMaskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+
+    private val blurPreviewPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        strokeWidth = 2f
+        color = Color.WHITE
+        alpha = 180
+    }
+
+    /**
+     * Semi-transparent tint applied over pixelated regions. The selected
+     * annotation color controls the tint while the mosaic detail remains
+     * visible underneath.
+     */
+    private val pixelateColorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        alpha = 120
+    }
+
     private var initialRotation = 0f
     private var initialRotationAngle = 0f
     private var initialElementScale = 1f
@@ -227,6 +332,402 @@ class PhotoEditorView @JvmOverloads constructor(
      * The new shape is automatically selected through addElement(), so the
      * existing selection callback and Delete button continue to work.
      */
+    /**
+     * Enters the Freehand Drawing mode.
+     *
+     * While active, single-finger canvas gestures create an annotation path
+     * instead of selecting/moving editor elements or panning the image.
+     */
+    fun enterFreehandMode(): Boolean {
+        if (bitmap == null) {
+            Log.d(TAG, "Cannot enter freehand mode. No image selected.")
+            return false
+        }
+
+        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
+            Log.d(TAG, "Cannot enter freehand mode. Editor mode is active.")
+            return false
+        }
+
+        annotationController.setAnnotationType(AnnotationType.FREEHAND)
+        activeAnnotationType = AnnotationType.FREEHAND
+        freehandModeActive = true
+        eraserModeActive = false
+        annotationSelectionVisible = true
+        resetElementGestureState()
+        activeAnnotationPath = null
+        activeAnnotationPointCount = 0
+        selectElement(null)
+        Log.d(TAG, "Freehand mode entered")
+        invalidate()
+        return true
+    }
+
+    /**
+     * Enters Pen annotation mode.
+     *
+     * Pen uses the same image-space path and gesture pipeline as Freehand,
+     * but the created element is stored as a PEN annotation.
+     */
+    fun enterPenMode(): Boolean {
+        if (bitmap == null) {
+            Log.d(TAG, "Cannot enter pen mode. No image selected.")
+            return false
+        }
+
+        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
+            Log.d(TAG, "Cannot enter pen mode. Editor mode is active.")
+            return false
+        }
+
+        annotationController.setAnnotationType(AnnotationType.PEN)
+        activeAnnotationType = AnnotationType.PEN
+        freehandModeActive = true
+        eraserModeActive = false
+        annotationSelectionVisible = true
+        resetElementGestureState()
+        activeAnnotationPath = null
+        activeAnnotationPointCount = 0
+        selectElement(null)
+        Log.d(TAG, "Pen mode entered")
+        invalidate()
+        return true
+    }
+
+    /**
+     * Enters Highlighter annotation mode.
+     *
+     * Highlighter uses the same image-space drawing pipeline as Freehand and
+     * Pen, while AnnotationElement renders it with a translucent stroke.
+     */
+    fun enterHighlighterMode(): Boolean {
+        if (bitmap == null) {
+            Log.d(TAG, "Cannot enter highlighter mode. No image selected.")
+            return false
+        }
+
+        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
+            Log.d(TAG, "Cannot enter highlighter mode. Editor mode is active.")
+            return false
+        }
+
+        annotationController.setAnnotationType(AnnotationType.HIGHLIGHTER)
+        activeAnnotationType = AnnotationType.HIGHLIGHTER
+        freehandModeActive = true
+        eraserModeActive = false
+        annotationSelectionVisible = true
+        resetElementGestureState()
+        activeAnnotationPath = null
+        activeAnnotationPointCount = 0
+        selectElement(null)
+        Log.d(TAG, "Highlighter mode entered")
+        invalidate()
+        return true
+    }
+
+    /**
+     * Enters Blur annotation mode.
+     *
+     * Blur uses the same freehand path interaction as the other drawing tools,
+     * but the path is used as a mask over a blurred copy of the image.
+     */
+    fun enterBlurMode(): Boolean {
+        if (bitmap == null) {
+            Log.d(TAG, "Cannot enter blur mode. No image selected.")
+            return false
+        }
+
+        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
+            Log.d(TAG, "Cannot enter blur mode. Editor mode is active.")
+            return false
+        }
+
+        annotationController.setAnnotationType(AnnotationType.BLUR)
+        activeAnnotationType = AnnotationType.BLUR
+        freehandModeActive = true
+        eraserModeActive = false
+        annotationSelectionVisible = true
+        activeAnnotationPath = null
+        activeAnnotationPointCount = 0
+        activeEraserPoint = null
+        lastEraserImagePoint = null
+        resetElementGestureState()
+        selectElement(null)
+        Log.d(TAG, "Blur mode entered")
+        invalidate()
+        return true
+    }
+
+    /**
+     * Enters Pixelate annotation mode.
+     *
+     * Pixelate uses the same image-space freehand path interaction as the
+     * other drawing tools, but the path is used as a mask over a cached
+     * pixelated copy of the current image.
+     */
+    fun enterPixelateMode(): Boolean {
+        if (bitmap == null) {
+            Log.d(TAG, "Cannot enter pixelate mode. No image selected.")
+            return false
+        }
+
+        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
+            Log.d(TAG, "Cannot enter pixelate mode. Editor mode is active.")
+            return false
+        }
+
+        annotationController.setAnnotationType(AnnotationType.PIXELATE)
+        activeAnnotationType = AnnotationType.PIXELATE
+        freehandModeActive = true
+        eraserModeActive = false
+        annotationSelectionVisible = true
+        activeAnnotationPath = null
+        activeAnnotationPointCount = 0
+        activeEraserPoint = null
+        lastEraserImagePoint = null
+        resetElementGestureState()
+        selectElement(null)
+
+        Log.d(TAG, "Pixelate mode entered")
+        invalidate()
+        return true
+    }
+
+    /**
+     * Enters Eraser annotation mode.
+     *
+     * The eraser operates only on AnnotationElement instances and never
+     * modifies the original bitmap, text, or shapes.
+     */
+    fun enterEraserMode(): Boolean {
+        if (bitmap == null) {
+            Log.d(TAG, "Cannot enter eraser mode. No image selected.")
+            return false
+        }
+
+        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
+            Log.d(TAG, "Cannot enter eraser mode. Editor mode is active.")
+            return false
+        }
+
+        annotationController.setAnnotationType(AnnotationType.ERASER)
+        activeAnnotationType = AnnotationType.ERASER
+        freehandModeActive = false
+        eraserModeActive = true
+        annotationSelectionVisible = true
+        activeAnnotationPath = null
+        activeAnnotationPointCount = 0
+        activeEraserPoint = null
+        lastEraserImagePoint = null
+        resetElementGestureState()
+        selectElement(null)
+        Log.d(TAG, "Eraser mode entered")
+        invalidate()
+        return true
+    }
+
+    /**
+     * Controls visibility of annotation selection handles independently from
+     * the drawing state. The selected annotation itself is preserved when the
+     * annotation toolbar is closed, so reopening the toolbar restores its
+     * selection/delete affordance.
+     */
+    fun setAnnotationSelectionVisible(visible: Boolean) {
+        annotationSelectionVisible = visible
+        invalidate()
+    }
+
+    /**
+     * Reopens annotation selection UI without entering a drawing tool.
+     * Existing selected annotations are intentionally preserved.
+     */
+    fun enterAnnotationSelectionMode() {
+        if (bitmap == null) return
+
+        freehandModeActive = false
+        eraserModeActive = false
+        activeAnnotationPath = null
+        activeAnnotationPointCount = 0
+        activeEraserPoint = null
+        lastEraserImagePoint = null
+        annotationSelectionVisible = true
+        resetElementGestureState()
+        invalidate()
+    }
+
+    /** Returns true when an annotation drawing mode currently owns canvas touch input. */
+    fun isFreehandMode(): Boolean = freehandModeActive
+
+    /**
+     * Updates the color used by newly created annotation strokes.
+     * The in-progress preview also uses the new color immediately.
+     */
+    fun setAnnotationColor(color: Int) {
+        annotationController.setColor(color)
+        invalidate()
+    }
+
+    /**
+     * Updates the stroke width used by newly created annotation strokes.
+     * The value is stored in image coordinates.
+     */
+    fun setAnnotationStrokeWidth(strokeWidth: Float) {
+        annotationController.setStrokeWidth(strokeWidth)
+        invalidate()
+    }
+
+    /** Returns the currently selected annotation color. */
+    fun getAnnotationColor(): Int = annotationController.currentColor
+
+    /** Returns the currently selected annotation stroke width. */
+    fun getAnnotationStrokeWidth(): Float = annotationController.currentStrokeWidth
+
+    /** Exits Freehand Drawing mode without changing existing annotations. */
+    fun exitFreehandMode() {
+        // Always hide annotation selection UI when leaving the annotation
+        // toolbar, even if drawing mode was already stopped after selecting
+        // an existing annotation. The selected annotation itself is kept so
+        // reopening the annotation toolbar can show its handles again.
+        if (freehandModeActive || eraserModeActive) {
+            finishActiveFreehandPath(commit = false)
+            cancelAnnotationHistoryGesture()
+        }
+        activeEraserPoint = null
+        lastEraserImagePoint = null
+        freehandModeActive = false
+        eraserModeActive = false
+        annotationSelectionVisible = false
+        resetElementGestureState()
+        Log.d(TAG, "Freehand mode exited")
+        invalidate()
+    }
+
+    /**
+     * Captures the current annotation state before a drawing/eraser gesture.
+     * One complete finger gesture becomes one Undo operation.
+     */
+    private fun beginAnnotationHistoryGesture() {
+        annotationHistoryBeforeGesture =
+            annotationHistoryController.capture(elements)
+    }
+
+    /**
+     * Records the annotation state after a completed drawing/eraser gesture.
+     */
+    private fun finishAnnotationHistoryGesture() {
+        val before = annotationHistoryBeforeGesture
+            ?: return
+
+        val after =
+            annotationHistoryController.capture(elements)
+
+        annotationHistoryController.record(
+            before = before,
+            after = after
+        )
+
+        annotationHistoryBeforeGesture = null
+        onAnnotationHistoryChanged?.invoke()
+    }
+
+    /** Discards a pending annotation history gesture without recording it. */
+    private fun cancelAnnotationHistoryGesture() {
+        annotationHistoryBeforeGesture = null
+    }
+
+    /**
+     * Restores only AnnotationElement state from an annotation history snapshot.
+     *
+     * Text, shapes, image transforms, crop state and other editor state are
+     * intentionally untouched.
+     */
+    private fun restoreAnnotationState(
+        state: AnnotationHistoryController.State
+    ) {
+        elements.removeAll { element ->
+            element is AnnotationElement
+        }
+
+        state.annotations
+            .sortedBy { it.index }
+            .forEach { snapshot ->
+                val annotation = AnnotationElement(
+                    annotationType = snapshot.annotationType,
+                    path = Path(snapshot.path),
+                    color = snapshot.color,
+                    strokeWidth = snapshot.strokeWidth
+                )
+
+                val targetIndex =
+                    snapshot.index.coerceIn(0, elements.size)
+
+                elements.add(targetIndex, annotation)
+            }
+
+        selectedElement?.isSelected = false
+        selectedElement = null
+        transformMode = TransformMode.NONE
+
+        notifySelectionChanged()
+        invalidate()
+    }
+
+    /** Undoes the most recent annotation operation. */
+    fun undoAnnotation(): Boolean {
+        if (freehandModeActive || eraserModeActive) {
+            finishActiveFreehandPath(commit = false)
+            freehandModeActive = false
+            eraserModeActive = false
+            activeEraserPoint = null
+            lastEraserImagePoint = null
+            resetElementGestureState()
+        }
+
+        val state = annotationHistoryController.undo()
+            ?: return false
+
+        restoreAnnotationState(state)
+        onAnnotationHistoryChanged?.invoke()
+
+        Log.d(TAG, "Annotation undo performed")
+        return true
+    }
+
+    /** Redoes the most recently undone annotation operation. */
+    fun redoAnnotation(): Boolean {
+        if (freehandModeActive || eraserModeActive) {
+            finishActiveFreehandPath(commit = false)
+            freehandModeActive = false
+            eraserModeActive = false
+            activeEraserPoint = null
+            lastEraserImagePoint = null
+            resetElementGestureState()
+        }
+
+        val state = annotationHistoryController.redo()
+            ?: return false
+
+        restoreAnnotationState(state)
+        onAnnotationHistoryChanged?.invoke()
+
+        Log.d(TAG, "Annotation redo performed")
+        return true
+    }
+
+    fun canUndoAnnotation(): Boolean =
+        annotationHistoryController.canUndo()
+
+    fun canRedoAnnotation(): Boolean =
+        annotationHistoryController.canRedo()
+
+    /** Clears annotation Undo/Redo history without changing annotations. */
+    fun clearAnnotationHistory() {
+        annotationHistoryController.clear()
+        annotationHistoryBeforeGesture = null
+        onAnnotationHistoryChanged?.invoke()
+        invalidate()
+    }
+
     fun addShape(shapeType: ShapeType): Boolean {
         val currentBitmap = bitmap
         if (currentBitmap == null) {
@@ -275,6 +776,14 @@ class PhotoEditorView @JvmOverloads constructor(
     /** Called when temporary filter-selection mode starts or ends. */
     var onFilterModeChanged:
             ((Boolean) -> Unit)? = null
+    /**
+     * Called whenever annotation Undo/Redo availability changes.
+     *
+     * MainActivity uses this callback to enable/disable the annotation
+     * Undo and Redo toolbar buttons.
+     */
+    var onAnnotationHistoryChanged:
+            (() -> Unit)? = null
     /** Owns temporary adjustment state and background preview processing. */
     private val adjustmentController = AdjustmentController(
         getSourceBitmap = { bitmap },
@@ -381,6 +890,8 @@ class PhotoEditorView @JvmOverloads constructor(
     fun setImage(
         bitmap: Bitmap
     ) {
+        clearBlurredBitmapCache()
+        clearAnnotationHistory()
         this.bitmap = bitmap
         resetTransform()
         elements.clear()
@@ -392,12 +903,21 @@ class PhotoEditorView @JvmOverloads constructor(
         transformController.clearSession()
         filterController.clear()
         adjustmentController.clearSession()
+        freehandModeActive = false
+        eraserModeActive = false
+        activeAnnotationPath = null
+        activeAnnotationPointCount = 0
+        activeAnnotationType = AnnotationType.FREEHAND
+        activeEraserPoint = null
+        lastEraserImagePoint = null
         notifySelectionChanged()
         onCropModeChanged?.invoke(false)
         Log.d( TAG, "Image set: ${bitmap.width} x ${bitmap.height}" )
         invalidate()
     }
     fun clearImage() {
+        clearBlurredBitmapCache()
+        clearAnnotationHistory()
         bitmap = null
         elements.clear()
         selectedElement = null
@@ -408,11 +928,198 @@ class PhotoEditorView @JvmOverloads constructor(
         cropController.clearSession()
         transformController.clearSession()
         adjustmentController.clearSession()
+        freehandModeActive = false
+        eraserModeActive = false
+        activeAnnotationPath = null
+        activeAnnotationPointCount = 0
+        activeAnnotationType = AnnotationType.FREEHAND
+        activeEraserPoint = null
+        lastEraserImagePoint = null
         notifySelectionChanged()
         onCropModeChanged?.invoke(false)
         invalidate()
     }
     fun getCurrentBitmap(): Bitmap? = bitmap
+    /**
+     * Applies all current annotation effects directly to the editor bitmap.
+     *
+     * Blur and Pixelate are composited from the current source bitmap using
+     * their existing image-space paths. Regular annotations are rendered into
+     * the same bitmap. Text and Shape elements remain editable because they
+     * are intentionally not part of the annotation layer.
+     *
+     * After applying, annotation elements are removed and annotation history
+     * is cleared because the committed bitmap is now the new source image.
+     */
+    fun applyAnnotations(): Boolean {
+        val sourceBitmap = bitmap ?: return false
+
+        // Finish any active drawing gesture before committing the annotation layer.
+        if (freehandModeActive) {
+            finishActiveFreehandPath(commit = true)
+        }
+        cancelAnnotationHistoryGesture()
+
+        val annotationElements = elements
+            .filterIsInstance<AnnotationElement>()
+            .toList()
+
+        if (annotationElements.isEmpty()) {
+            return false
+        }
+
+        return try {
+            val outputBitmap = Bitmap.createBitmap(
+                sourceBitmap.width,
+                sourceBitmap.height,
+                Bitmap.Config.ARGB_8888
+            )
+
+            val outputCanvas = Canvas(outputBitmap)
+
+            // Start from the current editor bitmap so every existing image edit
+            // remains intact.
+            outputCanvas.drawBitmap(
+                sourceBitmap,
+                0f,
+                0f,
+                bitmapPaint
+            )
+
+            val identityMatrix = Matrix()
+
+            // Blur/Pixelate must be composited from the original source bitmap
+            // rather than from the progressively modified output bitmap.
+            val blurredSource = if (
+                annotationElements.any {
+                    it.annotationType == AnnotationType.BLUR
+                }
+            ) {
+                getOrCreateBlurredBitmap(sourceBitmap)
+            } else {
+                null
+            }
+
+            val pixelatedSource = if (
+                annotationElements.any {
+                    it.annotationType == AnnotationType.PIXELATE
+                }
+            ) {
+                getOrCreatePixelatedBitmap(sourceBitmap)
+            } else {
+                null
+            }
+
+            annotationElements.forEach { annotation ->
+                when (annotation.annotationType) {
+                    AnnotationType.BLUR -> {
+                        val blurred = blurredSource ?: return@forEach
+
+                        blurMaskPaint.style = Paint.Style.STROKE
+                        blurMaskPaint.strokeWidth = annotation.strokeWidth
+                        blurMaskPaint.xfermode = null
+
+                        val maskPath = Path()
+                        blurMaskPaint.getFillPath(
+                            annotation.path,
+                            maskPath
+                        )
+
+                        outputCanvas.save()
+                        outputCanvas.clipPath(maskPath)
+                        outputCanvas.drawBitmap(
+                            blurred,
+                            0f,
+                            0f,
+                            bitmapPaint
+                        )
+                        outputCanvas.restore()
+                    }
+
+                    AnnotationType.PIXELATE -> {
+                        val pixelated = pixelatedSource ?: return@forEach
+
+                        blurMaskPaint.style = Paint.Style.STROKE
+                        blurMaskPaint.strokeWidth = annotation.strokeWidth
+                        blurMaskPaint.xfermode = null
+
+                        val maskPath = Path()
+                        blurMaskPaint.getFillPath(
+                            annotation.path,
+                            maskPath
+                        )
+
+                        outputCanvas.save()
+                        outputCanvas.clipPath(maskPath)
+                        outputCanvas.drawBitmap(
+                            pixelated,
+                            0f,
+                            0f,
+                            bitmapPaint
+                        )
+
+                        pixelateColorPaint.color = annotation.color
+                        outputCanvas.drawPath(
+                            maskPath,
+                            pixelateColorPaint
+                        )
+                        outputCanvas.restore()
+                    }
+
+                    AnnotationType.FREEHAND,
+                    AnnotationType.PEN,
+                    AnnotationType.HIGHLIGHTER -> {
+                        annotation.draw(
+                            outputCanvas,
+                            identityMatrix
+                        )
+                    }
+
+                    // Eraser changes annotation paths while editing and does
+                    // not represent a drawable bitmap layer of its own.
+                    AnnotationType.ERASER -> Unit
+                }
+            }
+
+            bitmap = outputBitmap
+            clearBlurredBitmapCache()
+
+            elements.removeAll { element ->
+                element is AnnotationElement
+            }
+
+            selectedElement = null
+            annotationSelectionVisible = false
+            activeAnnotationPath = null
+            activeAnnotationPointCount = 0
+            activeEraserPoint = null
+            lastEraserImagePoint = null
+            freehandModeActive = false
+            eraserModeActive = false
+            resetElementGestureState()
+            notifySelectionChanged()
+
+            annotationHistoryController.clear()
+            annotationHistoryBeforeGesture = null
+            onAnnotationHistoryChanged?.invoke()
+
+            invalidate()
+
+            Log.d(
+                TAG,
+                "Annotations applied: ${annotationElements.size}"
+            )
+            true
+        } catch (exception: Exception) {
+            Log.e(
+                TAG,
+                "Unable to apply annotations",
+                exception
+            )
+            false
+        }
+    }
+
     /**
      * Flips the current image horizontally while preserving its dimensions.
      *
@@ -1534,6 +2241,7 @@ class PhotoEditorView @JvmOverloads constructor(
     }
     fun getElements(): List<EditorElement> = elements
     fun clearElements() {
+        clearAnnotationHistory()
         elements.forEach {
             it.isSelected = false
         }
@@ -1834,25 +2542,167 @@ class PhotoEditorView @JvmOverloads constructor(
         imageY: Float
     ): EditorElement? {
         /*
-         * Search backwards so the top-most
-         * element is selected first.
+         * Search backwards so the top-most element is selected first.
+         *
+         * Annotation paths are often very thin. Using only EditorElement.contains()
+         * makes a freehand stroke difficult to select with a finger, especially
+         * after it has been scaled on screen. Give annotations a small image-space
+         * touch tolerance and fall back to the normal element hit test for all
+         * other element types.
          */
-        for (
-        index in elements.indices.reversed()
-        ) {
-            val element =
-                elements[index]
-            if (
-                element.contains(
-                    imageX,
-                    imageY
-                )
-            ) {
+        for (index in elements.indices.reversed()) {
+            val element = elements[index]
+
+            if (element is AnnotationElement) {
+                if (isPointNearAnnotation(element, imageX, imageY)) {
+                    return element
+                }
+            } else if (element.contains(imageX, imageY)) {
                 return element
             }
         }
+
         return null
     }
+
+    private fun isPointNearAnnotation(
+        annotation: AnnotationElement,
+        imageX: Float,
+        imageY: Float
+    ): Boolean {
+        val bounds = annotation.getBounds()
+        val tolerance =
+            maxOf(
+                annotation.strokeWidth * 1.5f,
+                ANNOTATION_SELECTION_TOUCH_PADDING
+            )
+
+        if (imageX < bounds.left - tolerance ||
+            imageX > bounds.right + tolerance ||
+            imageY < bounds.top - tolerance ||
+            imageY > bounds.bottom + tolerance
+        ) {
+            return false
+        }
+
+        val measure = android.graphics.PathMeasure(annotation.path, false)
+        val position = FloatArray(2)
+        val step = 12f.coerceAtLeast(annotation.strokeWidth / 2f)
+
+        do {
+            val length = measure.length
+            if (length <= 0f) {
+                if (measure.getPosTan(0f, position, null)) {
+                    val dx = position[0] - imageX
+                    val dy = position[1] - imageY
+                    if (dx * dx + dy * dy <= tolerance * tolerance) return true
+                }
+            } else {
+                var distanceAlongPath = 0f
+                while (distanceAlongPath <= length) {
+                    if (!measure.getPosTan(distanceAlongPath, position, null)) break
+                    val dx = position[0] - imageX
+                    val dy = position[1] - imageY
+                    if (dx * dx + dy * dy <= tolerance * tolerance) return true
+                    distanceAlongPath += step
+                }
+
+                if (measure.getPosTan(length, position, null)) {
+                    val dx = position[0] - imageX
+                    val dy = position[1] - imageY
+                    if (dx * dx + dy * dy <= tolerance * tolerance) return true
+                }
+            }
+        } while (measure.nextContour())
+
+        return false
+    }
+    private fun getAnnotationDeleteHandlePosition(annotation: AnnotationElement): PointF {
+        val bounds = annotation.getBounds()
+        val topRight = imageToScreen(bounds.right, bounds.top) ?: return PointF()
+        return PointF(
+            topRight.x + ANNOTATION_DELETE_HANDLE_DISTANCE,
+            topRight.y - ANNOTATION_DELETE_HANDLE_DISTANCE
+        )
+    }
+
+    private fun isOnAnnotationDeleteHandle(eventX: Float, eventY: Float): Boolean {
+        val annotation = selectedElement as? AnnotationElement ?: return false
+        val handle = getAnnotationDeleteHandlePosition(annotation)
+        return distance(eventX, eventY, handle.x, handle.y) <= ANNOTATION_DELETE_BUTTON_TOUCH_RADIUS
+    }
+
+    private fun drawAnnotationSelectionHandles(canvas: Canvas, annotation: AnnotationElement) {
+        val bounds = annotation.getBounds()
+        val topLeft = imageToScreen(bounds.left, bounds.top) ?: return
+        val topRight = imageToScreen(bounds.right, bounds.top) ?: return
+        val bottomRight = imageToScreen(bounds.right, bounds.bottom) ?: return
+        val bottomLeft = imageToScreen(bounds.left, bounds.bottom) ?: return
+        val deleteHandle = getAnnotationDeleteHandlePosition(annotation)
+
+        val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2.5f
+            color = Color.WHITE
+            alpha = 220
+        }
+        val selectionPath = Path().apply {
+            moveTo(topLeft.x, topLeft.y)
+            lineTo(topRight.x, topRight.y)
+            lineTo(bottomRight.x, bottomRight.y)
+            lineTo(bottomLeft.x, bottomLeft.y)
+            close()
+        }
+        canvas.drawPath(selectionPath, selectionPaint)
+        canvas.drawLine(topRight.x, topRight.y, deleteHandle.x, deleteHandle.y, selectionPaint)
+
+        val buttonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.rgb(220, 45, 45)
+        }
+        val buttonStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 3.5f
+            color = Color.WHITE
+        }
+        val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
+            strokeCap = Paint.Cap.ROUND
+            color = Color.WHITE
+        }
+
+        // Large, high-contrast delete button with a visible X.
+        canvas.drawCircle(
+            deleteHandle.x,
+            deleteHandle.y,
+            ANNOTATION_DELETE_BUTTON_RADIUS,
+            buttonPaint
+        )
+        canvas.drawCircle(
+            deleteHandle.x,
+            deleteHandle.y,
+            ANNOTATION_DELETE_BUTTON_RADIUS,
+            buttonStroke
+        )
+        val iconSize = ANNOTATION_DELETE_BUTTON_RADIUS * 0.38f
+        canvas.drawLine(
+            deleteHandle.x - iconSize,
+            deleteHandle.y - iconSize,
+            deleteHandle.x + iconSize,
+            deleteHandle.y + iconSize,
+            iconPaint
+        )
+        canvas.drawLine(
+            deleteHandle.x + iconSize,
+            deleteHandle.y - iconSize,
+            deleteHandle.x - iconSize,
+            deleteHandle.y + iconSize,
+            iconPaint
+        )
+
+    }
+
     private fun getShapeResizeHandlePosition(shape: ShapeElement): PointF {
         return transformShapePoint(
             shape,
@@ -2507,6 +3357,13 @@ class PhotoEditorView @JvmOverloads constructor(
             selectedElement
                 ?: return
         Log.d( TAG, "Deleting selected element" )
+
+        val annotationHistoryBeforeDelete =
+            if (element is AnnotationElement) {
+                annotationHistoryController.capture(elements)
+            } else {
+                null
+            }
         elements.remove(
             element
         )
@@ -2514,6 +3371,17 @@ class PhotoEditorView @JvmOverloads constructor(
         selectedElement = null
         transformMode = TransformMode.NONE
         notifySelectionChanged()
+
+        if (annotationHistoryBeforeDelete != null) {
+            val annotationHistoryAfterDelete =
+                annotationHistoryController.capture(elements)
+            annotationHistoryController.record(
+                before = annotationHistoryBeforeDelete,
+                after = annotationHistoryAfterDelete
+            )
+            onAnnotationHistoryChanged?.invoke()
+        }
+
         invalidate()
     }
     fun addTestText() {
@@ -2540,138 +3408,806 @@ class PhotoEditorView @JvmOverloads constructor(
             textElement
         )
     }
-    override fun onDraw(
-        canvas: Canvas
-    ) {
-        super.onDraw(
-            canvas
+    /** Starts a new freehand annotation path in image coordinates. */
+    private fun startFreehandPath(screenX: Float, screenY: Float): Boolean {
+        val imagePoint = screenToImage(screenX, screenY) ?: return false
+
+        val path = Path()
+        path.moveTo(imagePoint.x, imagePoint.y)
+
+        activeAnnotationPath = path
+        activeAnnotationPointCount = 1
+        return true
+    }
+
+    /** Adds the current screen point to the active image-space freehand path. */
+    private fun appendFreehandPoint(screenX: Float, screenY: Float): Boolean {
+        val path = activeAnnotationPath ?: return false
+        val imagePoint = screenToImage(screenX, screenY) ?: return false
+
+        path.lineTo(imagePoint.x, imagePoint.y)
+        activeAnnotationPointCount++
+        invalidate()
+        return true
+    }
+
+    /** Commits or discards the currently active freehand path. */
+    private fun finishActiveFreehandPath(commit: Boolean) {
+        val path = activeAnnotationPath
+        var historyCommitted = false
+
+        if (
+            commit &&
+            activeAnnotationType != AnnotationType.ERASER &&
+            path != null &&
+            activeAnnotationPointCount >= 2
+        ) {
+            val annotation = annotationController.createAnnotation(
+                path = path,
+                annotationType = activeAnnotationType,
+                color = annotationController.currentColor,
+                strokeWidth = annotationController.currentStrokeWidth
+            )
+
+            addElement(annotation)
+            historyCommitted = true
+
+            Log.d(
+                TAG,
+                "Freehand annotation added. Total elements=${elements.size}"
+            )
+        }
+
+        activeAnnotationPath = null
+        activeAnnotationPointCount = 0
+        activeAnnotationType = AnnotationType.FREEHAND
+
+        if (historyCommitted) {
+            finishAnnotationHistoryGesture()
+        } else {
+            cancelAnnotationHistoryGesture()
+        }
+    }
+
+    /** Draws the in-progress freehand path without adding it to the element list. */
+    private fun drawActiveFreehandPath(canvas: Canvas) {
+        val path = activeAnnotationPath ?: return
+
+        if (
+            activeAnnotationType == AnnotationType.BLUR ||
+            activeAnnotationType == AnnotationType.PIXELATE
+        ) {
+            val transformedPath = Path(path)
+            transformedPath.transform(imageToScreenMatrix)
+            blurPreviewPaint.strokeWidth = annotationController.currentStrokeWidth *
+                    currentScreenScale()
+            canvas.drawPath(transformedPath, blurPreviewPaint)
+            return
+        }
+
+        val previewAnnotation = annotationController.createAnnotation(
+            path = path,
+            annotationType = activeAnnotationType,
+            color = annotationController.currentColor,
+            strokeWidth = annotationController.currentStrokeWidth
         )
+
+        previewAnnotation.draw(
+            canvas = canvas,
+            matrix = imageToScreenMatrix
+        )
+    }
+
+    private fun currentScreenScale(): Float {
+        val values = FloatArray(9)
+        imageToScreenMatrix.getValues(values)
+        return hypot(
+            values[Matrix.MSCALE_X].toDouble(),
+            values[Matrix.MSKEW_X].toDouble()
+        ).toFloat().coerceAtLeast(0.001f)
+    }
+
+    /** Draws the visible eraser cursor. */
+    private fun drawActiveEraserPreview(canvas: Canvas) {
+        val point = activeEraserPoint ?: return
+        val imageRadius = annotationController.currentStrokeWidth / 2f
+        val screenScale = currentScreenScale()
+        val screenRadius = imageRadius * screenScale
+
+        if (screenRadius <= 0f) return
+
+        // The fill makes the erase area easy to see without hiding the image.
+        canvas.drawCircle(
+            point.x,
+            point.y,
+            screenRadius,
+            eraserPreviewFillPaint
+        )
+
+        // The outline clearly shows the exact boundary of the erase area.
+        canvas.drawCircle(
+            point.x,
+            point.y,
+            screenRadius,
+            eraserPreviewPaint
+        )
+    }
+
+    /**
+     * Erases annotation content at the supplied image-space point.
+     * Returns true when at least one annotation changed.
+     */
+    private fun eraseAnnotationsAt(
+        imageX: Float,
+        imageY: Float
+    ): Boolean {
+        val radius = annotationController.currentStrokeWidth / 2f
+        var changed = false
+        val iterator = elements.listIterator()
+
+        while (iterator.hasNext()) {
+            val element = iterator.next()
+            if (element !is AnnotationElement) continue
+
+            val bounds = element.getBounds()
+            if (imageX < bounds.left - radius ||
+                imageX > bounds.right + radius ||
+                imageY < bounds.top - radius ||
+                imageY > bounds.bottom + radius
+            ) {
+                continue
+            }
+
+            val remains = element.eraseAt(
+                x = imageX,
+                y = imageY,
+                radius = radius
+            )
+
+            changed = true
+
+            if (!remains) {
+                element.isSelected = false
+                if (selectedElement === element) {
+                    selectedElement = null
+                }
+                iterator.remove()
+            }
+        }
+
+        if (changed) {
+            notifySelectionChanged()
+            invalidate()
+        }
+
+        return changed
+    }
+
+    /**
+     * Handles one eraser point in screen coordinates.
+     *
+     * Eraser gestures are converted to image coordinates and sampled between
+     * touch events so fast finger movement cannot jump over an annotation.
+     */
+    private fun eraseAtScreenPoint(screenX: Float, screenY: Float) {
+        val imagePoint = screenToImage(screenX, screenY) ?: return
+
+        activeEraserPoint = PointF(screenX, screenY)
+
+        val previous = lastEraserImagePoint
+        if (previous == null) {
+            eraseAnnotationsAt(
+                imageX = imagePoint.x,
+                imageY = imagePoint.y
+            )
+        } else {
+            val dx = imagePoint.x - previous.x
+            val dy = imagePoint.y - previous.y
+            val distance = hypot(dx.toDouble(), dy.toDouble()).toFloat()
+            val step = (annotationController.currentStrokeWidth / 2f)
+                .coerceAtLeast(2f)
+            val steps = (distance / step).toInt().coerceAtLeast(1)
+
+            for (index in 1..steps) {
+                val fraction = index.toFloat() / steps.toFloat()
+                val sampleX = previous.x + dx * fraction
+                val sampleY = previous.y + dy * fraction
+
+                eraseAnnotationsAt(
+                    imageX = sampleX,
+                    imageY = sampleY
+                )
+            }
+        }
+
+        lastEraserImagePoint = PointF(
+            imagePoint.x,
+            imagePoint.y
+        )
+
+        invalidate()
+    }
+
+    /** Draws all committed blur annotations over a blurred copy of the image. */
+    private fun drawBlurAnnotations(
+        canvas: Canvas,
+        sourceBitmap: Bitmap
+    ) {
+        val blurAnnotations = elements
+            .asSequence()
+            .filterIsInstance<AnnotationElement>()
+            .filter { it.annotationType == AnnotationType.BLUR }
+            .toList()
+
+        if (blurAnnotations.isEmpty()) return
+
+        val blurred = getOrCreateBlurredBitmap(sourceBitmap) ?: return
+
+        for (annotation in blurAnnotations) {
+            val transformedPath = Path(annotation.path)
+            transformedPath.transform(imageToScreenMatrix)
+
+            canvas.saveLayer(null, null)
+            canvas.drawBitmap(
+                blurred,
+                imageToScreenMatrix,
+                bitmapPaint
+            )
+
+            blurMaskPaint.strokeWidth = annotation.strokeWidth * currentScreenScale()
+            blurMaskPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+            canvas.drawPath(transformedPath, blurMaskPaint)
+            blurMaskPaint.xfermode = null
+            canvas.restore()
+        }
+    }
+
+    /**
+     * Draws all committed pixelate annotations over a pixelated copy of the image.
+     *
+     * The pixelated bitmap is cached per source bitmap so normal drawing does
+     * not regenerate the effect for every frame.
+     */
+    private fun drawPixelateAnnotations(
+        canvas: Canvas,
+        sourceBitmap: Bitmap
+    ) {
+        val pixelateAnnotations = elements
+            .asSequence()
+            .filterIsInstance<AnnotationElement>()
+            .filter { it.annotationType == AnnotationType.PIXELATE }
+            .toList()
+
+        if (pixelateAnnotations.isEmpty()) return
+
+        val pixelated = getOrCreatePixelatedBitmap(sourceBitmap) ?: return
+
+        for (annotation in pixelateAnnotations) {
+            val transformedPath = Path(annotation.path)
+            transformedPath.transform(imageToScreenMatrix)
+
+            /*
+             * Build the actual stroked shape and use it as a canvas clip.
+             *
+             * The previous implementation used DST_IN on a full-canvas layer.
+             * On the first render after creating a pixelate annotation, that
+             * approach could leave the full pixelated bitmap visible instead
+             * of restricting it to the finger path. Converting the stroke to
+             * a fill path and clipping before drawing makes the mask explicit
+             * and keeps the behavior deterministic on every render.
+             */
+            blurMaskPaint.style = Paint.Style.STROKE
+            blurMaskPaint.strokeWidth =
+                annotation.strokeWidth * currentScreenScale()
+            blurMaskPaint.xfermode = null
+
+            val maskPath = Path()
+            blurMaskPaint.getFillPath(
+                transformedPath,
+                maskPath
+            )
+
+            canvas.save()
+            canvas.clipPath(maskPath)
+
+            // Draw the mosaic first so the original image detail is still
+            // recognizable as pixel blocks.
+            canvas.drawBitmap(
+                pixelated,
+                imageToScreenMatrix,
+                bitmapPaint
+            )
+
+            // Apply the annotation's selected color as a translucent tint.
+            // This makes the existing Annotation Color button work for
+            // Pixelate without changing the underlying pixelation algorithm.
+            pixelateColorPaint.color = annotation.color
+            canvas.drawPath(maskPath, pixelateColorPaint)
+
+            canvas.restore()
+        }
+    }
+
+    /**
+     * Returns a cached pixelated copy of the supplied bitmap.
+     *
+     * A block-average mosaic is used so the result remains compatible with
+     * the project's existing Android/API configuration.
+     */
+    private fun getOrCreatePixelatedBitmap(source: Bitmap): Bitmap? {
+        if (
+            pixelatedBitmapSource === source &&
+            pixelatedBitmap != null &&
+            !pixelatedBitmap!!.isRecycled
+        ) {
+            return pixelatedBitmap
+        }
+
+        pixelatedBitmap = null
+        pixelatedBitmapSource = null
+
+        return try {
+            val output = Bitmap.createBitmap(
+                source.width,
+                source.height,
+                Bitmap.Config.ARGB_8888
+            )
+
+            val pixels = IntArray(source.width * source.height)
+            source.getPixels(
+                pixels,
+                0,
+                source.width,
+                0,
+                0,
+                source.width,
+                source.height
+            )
+
+            // 16px blocks provide a visible mosaic while retaining enough
+            // detail for the user to see the covered area.
+            val blockSize = 16
+
+            var blockTop = 0
+            while (blockTop < source.height) {
+                val blockBottom =
+                    min(blockTop + blockSize, source.height)
+
+                var blockLeft = 0
+                while (blockLeft < source.width) {
+                    val blockRight =
+                        min(blockLeft + blockSize, source.width)
+
+                    var a = 0
+                    var r = 0
+                    var g = 0
+                    var b = 0
+                    var count = 0
+
+                    for (y in blockTop until blockBottom) {
+                        val row = y * source.width
+
+                        for (x in blockLeft until blockRight) {
+                            val color = pixels[row + x]
+
+                            a += Color.alpha(color)
+                            r += Color.red(color)
+                            g += Color.green(color)
+                            b += Color.blue(color)
+                            count++
+                        }
+                    }
+
+                    if (count > 0) {
+                        val average = Color.argb(
+                            a / count,
+                            r / count,
+                            g / count,
+                            b / count
+                        )
+
+                        for (y in blockTop until blockBottom) {
+                            val row = y * source.width
+
+                            for (x in blockLeft until blockRight) {
+                                pixels[row + x] = average
+                            }
+                        }
+                    }
+
+                    blockLeft += blockSize
+                }
+
+                blockTop += blockSize
+            }
+
+            output.setPixels(
+                pixels,
+                0,
+                source.width,
+                0,
+                0,
+                source.width,
+                source.height
+            )
+
+            pixelatedBitmap = output
+            pixelatedBitmapSource = source
+            output
+        } catch (exception: Exception) {
+            Log.e(
+                TAG,
+                "Unable to create pixelated bitmap",
+                exception
+            )
+
+            pixelatedBitmap = null
+            pixelatedBitmapSource = null
+            null
+        }
+    }
+
+    /** Returns a cached blurred copy of the supplied bitmap. */
+    /**
+     * Returns a cached blurred copy of the supplied bitmap.
+     *
+     * Uses the existing CPU fallback blur implementation so this remains
+     * compatible with the project's current Android/API configuration.
+     */
+    private fun getOrCreateBlurredBitmap(source: Bitmap): Bitmap? {
+
+        if (
+            blurredBitmapSource === source &&
+            blurredBitmap != null &&
+            !blurredBitmap!!.isRecycled
+        ) {
+            return blurredBitmap
+        }
+
+        clearBlurredBitmapCache()
+
+        return try {
+            val output = Bitmap.createBitmap(
+                source.width,
+                source.height,
+                Bitmap.Config.ARGB_8888
+            )
+
+            drawFallbackBlur(
+                source = source,
+                output = output
+            )
+
+            blurredBitmap = output
+            blurredBitmapSource = source
+
+            output
+
+        } catch (exception: Exception) {
+
+            Log.e(
+                TAG,
+                "Unable to create blurred bitmap",
+                exception
+            )
+
+            clearBlurredBitmapCache()
+
+            null
+        }
+    }
+
+    /**
+     * Small separable box blur fallback for API levels below 31. The blur is
+     * generated once and cached, so normal drawing does not repeatedly process
+     * the image.
+     */
+    private fun drawFallbackBlur(source: Bitmap, output: Bitmap) {
+        val pixels = IntArray(source.width * source.height)
+        source.getPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+
+        val temp = IntArray(pixels.size)
+        val radius = 7
+        val diameter = radius * 2 + 1
+
+        for (y in 0 until source.height) {
+            val row = y * source.width
+            for (x in 0 until source.width) {
+                var a = 0
+                var r = 0
+                var g = 0
+                var b = 0
+                var count = 0
+                val start = maxOf(0, x - radius)
+                val end = minOf(source.width - 1, x + radius)
+                for (sampleX in start..end) {
+                    val color = pixels[row + sampleX]
+                    a += Color.alpha(color)
+                    r += Color.red(color)
+                    g += Color.green(color)
+                    b += Color.blue(color)
+                    count++
+                }
+                temp[row + x] = Color.argb(a / count, r / count, g / count, b / count)
+            }
+        }
+
+        for (x in 0 until source.width) {
+            for (y in 0 until source.height) {
+                var a = 0
+                var r = 0
+                var g = 0
+                var b = 0
+                var count = 0
+                val start = maxOf(0, y - radius)
+                val end = minOf(source.height - 1, y + radius)
+                for (sampleY in start..end) {
+                    val color = temp[sampleY * source.width + x]
+                    a += Color.alpha(color)
+                    r += Color.red(color)
+                    g += Color.green(color)
+                    b += Color.blue(color)
+                    count++
+                }
+                pixels[y * source.width + x] = Color.argb(a / count, r / count, g / count, b / count)
+            }
+        }
+
+        output.setPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+    }
+
+    private fun clearBlurredBitmapCache() {
+        blurredBitmap = null
+        blurredBitmapSource = null
+        pixelatedBitmap = null
+        pixelatedBitmapSource = null
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+
         val currentBitmap =
             when {
                 adjustmentModeActive -> adjustmentController.currentPreviewBitmap
                 filterModeActive -> filterPreviewBitmap
                 else -> bitmap
             } ?: return
-        if (
-            width <= 0 ||
-            height <= 0
-        ) {
+
+        if (width <= 0 || height <= 0) {
             return
         }
+
         updateMatrices()
+
         // DRAW IMAGE
         editorRenderer.drawBitmap(
             canvas = canvas,
             bitmap = currentBitmap,
             imageToScreenMatrix = imageToScreenMatrix
         )
-        // DRAW ELEMENTS
+
+        // DRAW BLUR ANNOTATIONS BEFORE TEXT/SHAPES SO THOSE ELEMENTS REMAIN SHARP.
+        drawBlurAnnotations(
+            canvas = canvas,
+            sourceBitmap = currentBitmap
+        )
+
+        // DRAW PIXELATE ANNOTATIONS BEFORE TEXT/SHAPES SO THOSE ELEMENTS
+        // remain sharp and the pixelation only affects the selected region.
+        drawPixelateAnnotations(
+            canvas = canvas,
+            sourceBitmap = currentBitmap
+        )
+
+        // PIXELATE annotations are visual effects rendered above, so exclude
+        // only those effect elements from the normal element renderer. Every
+        // existing Text/Shape/Freehand/Pen/Highlighter/Blur element remains
+        // on the existing rendering pipeline.
+        val drawableElements = elements.filterNot { element ->
+            element is AnnotationElement &&
+                    element.annotationType == AnnotationType.PIXELATE
+        }
+
         editorRenderer.drawElements(
             canvas = canvas,
-            elements = elements,
+            elements = drawableElements,
             imageToScreenMatrix = imageToScreenMatrix
         )
-        // DRAW SELECTION HANDLES
-        val selectedText =
-            selectedElement as? TextElement
+
+        // DRAW ACTIVE ANNOTATION PREVIEW
+        if (freehandModeActive) {
+            drawActiveFreehandPath(canvas)
+        }
+
+        // DRAW ERASER CURSOR
+        if (eraserModeActive) {
+            drawActiveEraserPreview(canvas)
+        }
+
+        val selectedAnnotation = selectedElement as? AnnotationElement
         if (
-            selectedText != null &&
-            selectedText.isSelected
+            annotationSelectionVisible &&
+            selectedAnnotation != null &&
+            selectedAnnotation.isSelected
         ) {
-            val bounds = selectedText.getBounds()
-            /*
-             * TextElement.getBounds() already returns transformed image/world
-             * coordinates. Convert those four corners directly to screen
-             * coordinates. Previously transformElementPoint() was used here,
-             * which transformed an already-transformed rectangle a second
-             * time and caused the selection handles to appear far from the
-             * actual text.
-             */
-            val topLeft = imageToScreenOrOrigin(bounds.left, bounds.top)
-            val topRight = imageToScreenOrOrigin(bounds.right, bounds.top)
-            val bottomLeft = imageToScreenOrOrigin(bounds.left, bounds.bottom)
-            val bottomRight = imageToScreenOrOrigin(bounds.right, bounds.bottom)
-            val rotationHandle = getRotationHandlePosition(selectedText)
-            val resizeHandle = getResizeHandlePosition(selectedText)
-            editorRenderer.drawTextSelectionHandles(
-                canvas = canvas,
-                topLeft = topLeft,
-                topRight = topRight,
-                bottomLeft = bottomLeft,
-                bottomRight = bottomRight,
-                rotationHandle = rotationHandle,
-                resizeHandle = resizeHandle
-            )
-            drawTextDeleteButton(
-                canvas = canvas,
-                textElement = selectedText
-            )
-        }
-        val selectedShape = selectedElement as? ShapeElement
-        if (selectedShape != null && selectedShape.isSelected) {
-            drawShapeSelectionHandles(canvas, selectedShape)
-        }
-        if (cropModeActive) {
-            drawCropSelection(canvas)
+            drawAnnotationSelectionHandles(canvas, selectedAnnotation)
         }
     }
-    /** Releases temporary adjustment processing when the view leaves the window. */
-    override fun onDetachedFromWindow() {
-        adjustmentController.close()
-        super.onDetachedFromWindow()
-    }
-    override fun onTouchEvent(
-        event: MotionEvent
-    ): Boolean {
-        if (cropModeActive) {
-            cropController.handleTouch(event)
-            return true
-        }
-        // Rotation mode is a button-driven preview session. Ignore all canvas
-        // gestures while it is active so pan, zoom, text movement and element
-        // transforms cannot mutate the temporary rotation state.
-        if (rotationModeActive) {
-            return true
-        }
-        // Adjustment mode is controlled by the adjustment toolbar.
-        // Canvas gestures must not mutate the editor during this session.
-        if (adjustmentModeActive) {
-            return true
-        }
-        // Filter mode is controlled by the filter toolbar.
-        if (filterModeActive) {
-            return true
-        }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
         /*
-         * First let GestureDetector process
-         * taps / double taps.
+         * Annotation selection actions always have highest priority. This is
+         * deliberately BEFORE eraser/freehand handling; otherwise a tap on
+         * the delete button is interpreted as a new drawing gesture.
          */
-        gestureDetector.onTouchEvent(
-            event
-        )
-        /*
-         * Always allow ScaleGestureDetector
-         * to process the event.
-         */
-        scaleGestureDetector.onTouchEvent(
-            event
-        )
-        when (
-            event.actionMasked
+        if (
+            event.actionMasked == MotionEvent.ACTION_DOWN &&
+            event.pointerCount == 1 &&
+            selectedElement is AnnotationElement &&
+            isOnAnnotationDeleteHandle(event.x, event.y)
         ) {
+            Log.d(TAG, "Annotation delete handle touched")
+            deleteSelectedElement()
+            isMovingElement = false
+            isDragging = false
+            transformMode = TransformMode.NONE
+            invalidate()
+            return true
+        }
+
+        // ERASER MODE
+        //
+        // Eraser is an exclusive interaction mode. It is checked before any
+        // GestureDetector/freehand/element handling and therefore can never
+        // create a new AnnotationElement.
+        if (eraserModeActive) {
+            // Defensive guard: even if another state was changed unexpectedly,
+            // eraser input must never fall through to the drawing pipeline.
+            freehandModeActive = false
+
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    resetElementGestureState()
+                    beginAnnotationHistoryGesture()
+                    activeEraserPoint = PointF(event.x, event.y)
+                    lastEraserImagePoint = null
+
+                    eraseAtScreenPoint(
+                        event.x,
+                        event.y
+                    )
+
+                    invalidate()
+                    return true
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    if (event.pointerCount == 1) {
+                        eraseAtScreenPoint(
+                            event.x,
+                            event.y
+                        )
+                    }
+                    return true
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    finishAnnotationHistoryGesture()
+                    activeEraserPoint = null
+                    lastEraserImagePoint = null
+                    isDragging = false
+                    isMovingElement = false
+                    transformMode = TransformMode.NONE
+                    invalidate()
+                    return true
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    cancelAnnotationHistoryGesture()
+                    activeEraserPoint = null
+                    lastEraserImagePoint = null
+                    isDragging = false
+                    isMovingElement = false
+                    transformMode = TransformMode.NONE
+                    invalidate()
+                    return true
+                }
+            }
+        }
+
+        // FREEHAND / PEN / HIGHLIGHTER MODE
+        if (freehandModeActive) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    /*
+                     * If the user taps an existing annotation while the drawing
+                     * mode is still active, treat that touch as selection rather
+                     * than starting another stroke. This prevents accidental
+                     * strokes and makes selection reliable even if the toolbar
+                     * cancel action was not the last interaction.
+                     */
+                    val tappedImagePoint = screenToImage(event.x, event.y)
+                    val tappedAnnotation = tappedImagePoint?.let { point ->
+                        findElementAt(point.x, point.y) as? AnnotationElement
+                    }
+
+                    if (tappedAnnotation != null) {
+                        freehandModeActive = false
+                        eraserModeActive = false
+                        activeAnnotationPath = null
+                        activeAnnotationPointCount = 0
+                        cancelAnnotationHistoryGesture()
+                        resetElementGestureState()
+                        selectElement(tappedAnnotation)
+                        isDragging = true
+                        isMovingElement = true
+                        lastTouchX = event.x
+                        lastTouchY = event.y
+                        return true
+                    }
+
+                    resetElementGestureState()
+                    isDragging = true
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                    beginAnnotationHistoryGesture()
+                    if (!startFreehandPath(event.x, event.y)) {
+                        cancelAnnotationHistoryGesture()
+                    }
+                    return true
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    if (event.pointerCount == 1 &&
+                        !scaleGestureDetector.isInProgress
+                    ) {
+                        appendFreehandPoint(event.x, event.y)
+                        lastTouchX = event.x
+                        lastTouchY = event.y
+                        invalidate()
+                    }
+                    return true
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    finishActiveFreehandPath(commit = true)
+                    isDragging = false
+                    isMovingElement = false
+                    transformMode = TransformMode.NONE
+                    invalidate()
+                    return true
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    finishActiveFreehandPath(commit = false)
+                    isDragging = false
+                    isMovingElement = false
+                    transformMode = TransformMode.NONE
+                    invalidate()
+                    return true
+                }
+            }
+        }
+
+        /*
+         * First let GestureDetector process taps / double taps.
+         */
+        gestureDetector.onTouchEvent(event)
+
+        /*
+         * Always allow ScaleGestureDetector to process the event.
+         */
+        scaleGestureDetector.onTouchEvent(event)
+
+        when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                lastTouchX =
-                    event.x
-                lastTouchY =
-                    event.y
-                isDragging =
-                    true
-                transformMode =
-                    TransformMode.NONE
+                lastTouchX = event.x
+                lastTouchY = event.y
+                isDragging = true
+                transformMode = TransformMode.NONE
+
                 /*
-                 * -------------------------------------------------------------
                  * CHECK FLOATING DELETE ACTIONS FIRST
-                 * -------------------------------------------------------------
                  */
                 if (
                     event.pointerCount == 1 &&
@@ -2684,6 +4220,7 @@ class PhotoEditorView @JvmOverloads constructor(
                     transformMode = TransformMode.NONE
                     return true
                 }
+
                 if (
                     event.pointerCount == 1 &&
                     selectedElement is ShapeElement &&
@@ -2694,6 +4231,7 @@ class PhotoEditorView @JvmOverloads constructor(
                     Log.d(TAG, "Shape rotation handle touched")
                     return true
                 }
+
                 if (
                     event.pointerCount == 1 &&
                     selectedElement is ShapeElement &&
@@ -2704,13 +4242,11 @@ class PhotoEditorView @JvmOverloads constructor(
                     Log.d(TAG, "Shape resize handle touched")
                     return true
                 }
+
                 if (
                     event.pointerCount == 1 &&
                     selectedElement is TextElement &&
-                    isOnTextDeleteHandle(
-                        event.x,
-                        event.y
-                    )
+                    isOnTextDeleteHandle(event.x, event.y)
                 ) {
                     Log.d(TAG, "Text delete button touched")
                     deleteSelectedElement()
@@ -2718,113 +4254,69 @@ class PhotoEditorView @JvmOverloads constructor(
                     transformMode = TransformMode.NONE
                     return true
                 }
+
                 if (
                     event.pointerCount == 1 &&
                     selectedElement is TextElement &&
-                    isOnRotationHandle(
-                        event.x,
-                        event.y
-                    )
+                    isOnRotationHandle(event.x, event.y)
                 ) {
-                    startRotation(
-                        event.x,
-                        event.y
-                    )
-                    isMovingElement =
-                        false
-                    Log.d( TAG, "Rotation handle touched" )
+                    startRotation(event.x, event.y)
+                    isMovingElement = false
+                    Log.d(TAG, "Rotation handle touched")
                     return true
                 }
+
                 /*
-                 * -------------------------------------------------------------
                  * CHECK RESIZE HANDLE
-                 * -------------------------------------------------------------
                  */
                 if (
                     event.pointerCount == 1 &&
                     selectedElement is TextElement &&
-                    isOnResizeHandle(
-                        event.x,
-                        event.y
-                    )
+                    isOnResizeHandle(event.x, event.y)
                 ) {
-                    startResize(
-                        event.x,
-                        event.y
-                    )
-                    isMovingElement =
-                        false
-                    Log.d( TAG, "Resize handle touched" )
+                    startResize(event.x, event.y)
+                    isMovingElement = false
+                    Log.d(TAG, "Resize handle touched")
                     return true
                 }
+
                 /*
-                 * -------------------------------------------------------------
                  * CONVERT SCREEN TO IMAGE
-                 * -------------------------------------------------------------
                  */
-                val imagePoint =
-                    screenToImage(
-                        event.x,
-                        event.y
-                    )
-                if (
-                    imagePoint != null
-                ) {
+                val imagePoint = screenToImage(event.x, event.y)
+
+                if (imagePoint != null) {
                     /*
-                     * ---------------------------------------------------------
                      * CHECK ELEMENT
-                     * ---------------------------------------------------------
                      */
-                    val touchedElement =
-                        findElementAt(
-                            imagePoint.x,
-                            imagePoint.y
-                        )
-                    if (
-                        touchedElement != null
-                    ) {
-                        /*
-                         * Select it.
-                         */
-                        selectElement(
-                            touchedElement
-                        )
-                        /*
-                         * Current gesture moves
-                         * the selected element.
-                         */
-                        isMovingElement =
-                            true
-                        Log.d( TAG, "Element touched" )
+                    val touchedElement = findElementAt(
+                        imagePoint.x,
+                        imagePoint.y
+                    )
+
+                    if (touchedElement != null) {
+                        selectElement(touchedElement)
+                        isMovingElement = true
+                        Log.d(TAG, "Element touched")
                     } else {
                         /*
-                         * -----------------------------------------------------
                          * EMPTY CANVAS
-                         * -----------------------------------------------------
                          */
-                        selectElement(
-                            null
-                        )
-                        /*
-                         * Current gesture pans
-                         * the image.
-                         */
-                        isMovingElement =
-                            false
-                        Log.d( TAG, "Empty canvas touched" )
+                        selectElement(null)
+                        isMovingElement = false
+                        Log.d(TAG, "Empty canvas touched")
                     }
                 }
+
                 return true
             }
+
             MotionEvent.ACTION_MOVE -> {
                 /*
-                 * -------------------------------------------------------------
                  * ROTATE ELEMENT
-                 * -------------------------------------------------------------
                  */
                 if (
-                    transformMode ==
-                    TransformMode.ROTATE &&
+                    transformMode == TransformMode.ROTATE &&
                     event.pointerCount == 1
                 ) {
                     if (selectedElement is ShapeElement) {
@@ -2832,20 +4324,17 @@ class PhotoEditorView @JvmOverloads constructor(
                     } else {
                         updateRotation(event.x, event.y)
                     }
-                    lastTouchX =
-                        event.x
-                    lastTouchY =
-                        event.y
+
+                    lastTouchX = event.x
+                    lastTouchY = event.y
                     return true
                 }
+
                 /*
-                 * -------------------------------------------------------------
                  * RESIZE ELEMENT
-                 * -------------------------------------------------------------
                  */
                 if (
-                    transformMode ==
-                    TransformMode.RESIZE &&
+                    transformMode == TransformMode.RESIZE &&
                     event.pointerCount == 1
                 ) {
                     if (selectedElement is ShapeElement) {
@@ -2853,93 +4342,70 @@ class PhotoEditorView @JvmOverloads constructor(
                     } else {
                         updateResize(event.x, event.y)
                     }
-                    lastTouchX =
-                        event.x
-                    lastTouchY =
-                        event.y
+
+                    lastTouchX = event.x
+                    lastTouchY = event.y
                     return true
                 }
+
                 /*
-                 * -------------------------------------------------------------
                  * NORMAL SINGLE FINGER MOVEMENT
-                 * -------------------------------------------------------------
-                 *
-                 * Multi-touch is handled by
-                 * ScaleGestureDetector.
+                 * Multi-touch is handled by ScaleGestureDetector.
                  */
                 if (
                     event.pointerCount == 1 &&
                     !scaleGestureDetector.isInProgress &&
                     isDragging
                 ) {
-                    if (
-                        isMovingElement &&
-                        selectedElement != null
-                    ) {
+                    if (isMovingElement && selectedElement != null) {
                         /*
                          * MOVE ELEMENT
                          */
-                        val previousPoint =
-                            screenToImage(
-                                lastTouchX,
-                                lastTouchY
-                            )
-                        val currentPoint =
-                            screenToImage(
-                                event.x,
-                                event.y
-                            )
-                        if (
-                            previousPoint != null &&
-                            currentPoint != null
-                        ) {
-                            val dx =
-                                currentPoint.x -
-                                        previousPoint.x
-                            val dy =
-                                currentPoint.y -
-                                        previousPoint.y
-                            selectedElement?.moveBy(
-                                dx,
-                                dy
-                            )
-                            Log.d( TAG, "Moving element " + "dx=$dx dy=$dy" )
+                        val previousPoint = screenToImage(
+                            lastTouchX,
+                            lastTouchY
+                        )
+                        val currentPoint = screenToImage(
+                            event.x,
+                            event.y
+                        )
+
+                        if (previousPoint != null && currentPoint != null) {
+                            val dx = currentPoint.x - previousPoint.x
+                            val dy = currentPoint.y - previousPoint.y
+
+                            selectedElement?.moveBy(dx, dy)
+                            Log.d(TAG, "Moving element dx=$dx dy=$dy")
                         }
                     } else {
                         /*
                          * MOVE IMAGE
                          */
-                        val dx =
-                            event.x -
-                                    lastTouchX
-                        val dy =
-                            event.y -
-                                    lastTouchY
-                        translationX +=
-                            dx
-                        translationY +=
-                            dy
-                        Log.d( TAG, "Panning image " + "dx=$dx dy=$dy" )
+                        val dx = event.x - lastTouchX
+                        val dy = event.y - lastTouchY
+
+                        translationX += dx
+                        translationY += dy
+                        Log.d(TAG, "Panning image dx=$dx dy=$dy")
                     }
-                    lastTouchX =
-                        event.x
-                    lastTouchY =
-                        event.y
+
+                    lastTouchX = event.x
+                    lastTouchY = event.y
                     invalidate()
                 }
+
                 return true
             }
+
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_CANCEL -> {
-                isDragging =
-                    false
-                isMovingElement =
-                    false
-                transformMode =
-                    TransformMode.NONE
+                isDragging = false
+                isMovingElement = false
+                transformMode = TransformMode.NONE
                 return true
             }
         }
+
         return true
     }
 }
