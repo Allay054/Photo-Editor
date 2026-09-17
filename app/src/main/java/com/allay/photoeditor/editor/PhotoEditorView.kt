@@ -338,30 +338,11 @@ class PhotoEditorView @JvmOverloads constructor(
      * While active, single-finger canvas gestures create an annotation path
      * instead of selecting/moving editor elements or panning the image.
      */
-    fun enterFreehandMode(): Boolean {
-        if (bitmap == null) {
-            Log.d(TAG, "Cannot enter freehand mode. No image selected.")
-            return false
-        }
-
-        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
-            Log.d(TAG, "Cannot enter freehand mode. Editor mode is active.")
-            return false
-        }
-
-        annotationController.setAnnotationType(AnnotationType.FREEHAND)
-        activeAnnotationType = AnnotationType.FREEHAND
-        freehandModeActive = true
-        eraserModeActive = false
-        annotationSelectionVisible = true
-        resetElementGestureState()
-        activeAnnotationPath = null
-        activeAnnotationPointCount = 0
-        selectElement(null)
-        Log.d(TAG, "Freehand mode entered")
-        invalidate()
-        return true
-    }
+    fun enterFreehandMode(): Boolean =
+        enterAnnotationMode(
+            annotationType = AnnotationType.FREEHAND,
+            modeName = "Freehand"
+        )
 
     /**
      * Enters Pen annotation mode.
@@ -369,30 +350,11 @@ class PhotoEditorView @JvmOverloads constructor(
      * Pen uses the same image-space path and gesture pipeline as Freehand,
      * but the created element is stored as a PEN annotation.
      */
-    fun enterPenMode(): Boolean {
-        if (bitmap == null) {
-            Log.d(TAG, "Cannot enter pen mode. No image selected.")
-            return false
-        }
-
-        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
-            Log.d(TAG, "Cannot enter pen mode. Editor mode is active.")
-            return false
-        }
-
-        annotationController.setAnnotationType(AnnotationType.PEN)
-        activeAnnotationType = AnnotationType.PEN
-        freehandModeActive = true
-        eraserModeActive = false
-        annotationSelectionVisible = true
-        resetElementGestureState()
-        activeAnnotationPath = null
-        activeAnnotationPointCount = 0
-        selectElement(null)
-        Log.d(TAG, "Pen mode entered")
-        invalidate()
-        return true
-    }
+    fun enterPenMode(): Boolean =
+        enterAnnotationMode(
+            annotationType = AnnotationType.PEN,
+            modeName = "Pen"
+        )
 
     /**
      * Enters Highlighter annotation mode.
@@ -400,30 +362,11 @@ class PhotoEditorView @JvmOverloads constructor(
      * Highlighter uses the same image-space drawing pipeline as Freehand and
      * Pen, while AnnotationElement renders it with a translucent stroke.
      */
-    fun enterHighlighterMode(): Boolean {
-        if (bitmap == null) {
-            Log.d(TAG, "Cannot enter highlighter mode. No image selected.")
-            return false
-        }
-
-        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
-            Log.d(TAG, "Cannot enter highlighter mode. Editor mode is active.")
-            return false
-        }
-
-        annotationController.setAnnotationType(AnnotationType.HIGHLIGHTER)
-        activeAnnotationType = AnnotationType.HIGHLIGHTER
-        freehandModeActive = true
-        eraserModeActive = false
-        annotationSelectionVisible = true
-        resetElementGestureState()
-        activeAnnotationPath = null
-        activeAnnotationPointCount = 0
-        selectElement(null)
-        Log.d(TAG, "Highlighter mode entered")
-        invalidate()
-        return true
-    }
+    fun enterHighlighterMode(): Boolean =
+        enterAnnotationMode(
+            annotationType = AnnotationType.HIGHLIGHTER,
+            modeName = "Highlighter"
+        )
 
     /**
      * Enters Blur annotation mode.
@@ -431,32 +374,11 @@ class PhotoEditorView @JvmOverloads constructor(
      * Blur uses the same freehand path interaction as the other drawing tools,
      * but the path is used as a mask over a blurred copy of the image.
      */
-    fun enterBlurMode(): Boolean {
-        if (bitmap == null) {
-            Log.d(TAG, "Cannot enter blur mode. No image selected.")
-            return false
-        }
-
-        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
-            Log.d(TAG, "Cannot enter blur mode. Editor mode is active.")
-            return false
-        }
-
-        annotationController.setAnnotationType(AnnotationType.BLUR)
-        activeAnnotationType = AnnotationType.BLUR
-        freehandModeActive = true
-        eraserModeActive = false
-        annotationSelectionVisible = true
-        activeAnnotationPath = null
-        activeAnnotationPointCount = 0
-        activeEraserPoint = null
-        lastEraserImagePoint = null
-        resetElementGestureState()
-        selectElement(null)
-        Log.d(TAG, "Blur mode entered")
-        invalidate()
-        return true
-    }
+    fun enterBlurMode(): Boolean =
+        enterAnnotationMode(
+            annotationType = AnnotationType.BLUR,
+            modeName = "Blur"
+        )
 
     /**
      * Enters Pixelate annotation mode.
@@ -465,33 +387,11 @@ class PhotoEditorView @JvmOverloads constructor(
      * other drawing tools, but the path is used as a mask over a cached
      * pixelated copy of the current image.
      */
-    fun enterPixelateMode(): Boolean {
-        if (bitmap == null) {
-            Log.d(TAG, "Cannot enter pixelate mode. No image selected.")
-            return false
-        }
-
-        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
-            Log.d(TAG, "Cannot enter pixelate mode. Editor mode is active.")
-            return false
-        }
-
-        annotationController.setAnnotationType(AnnotationType.PIXELATE)
-        activeAnnotationType = AnnotationType.PIXELATE
-        freehandModeActive = true
-        eraserModeActive = false
-        annotationSelectionVisible = true
-        activeAnnotationPath = null
-        activeAnnotationPointCount = 0
-        activeEraserPoint = null
-        lastEraserImagePoint = null
-        resetElementGestureState()
-        selectElement(null)
-
-        Log.d(TAG, "Pixelate mode entered")
-        invalidate()
-        return true
-    }
+    fun enterPixelateMode(): Boolean =
+        enterAnnotationMode(
+            annotationType = AnnotationType.PIXELATE,
+            modeName = "Pixelate"
+        )
 
     /**
      * Enters Eraser annotation mode.
@@ -499,31 +399,65 @@ class PhotoEditorView @JvmOverloads constructor(
      * The eraser operates only on AnnotationElement instances and never
      * modifies the original bitmap, text, or shapes.
      */
-    fun enterEraserMode(): Boolean {
+    fun enterEraserMode(): Boolean =
+        enterAnnotationMode(
+            annotationType = AnnotationType.ERASER,
+            modeName = "Eraser"
+        )
+
+    /**
+     * Shared annotation-mode entry point.
+     *
+     * All annotation tools use the same transient interaction state. Keeping
+     * that state reset in one place prevents the individual tool entry points
+     * from drifting apart while preserving their existing public API.
+     */
+    private fun enterAnnotationMode(
+        annotationType: AnnotationType,
+        modeName: String
+    ): Boolean {
         if (bitmap == null) {
-            Log.d(TAG, "Cannot enter eraser mode. No image selected.")
+            Log.d(TAG, "Cannot enter $modeName mode. No image selected.")
             return false
         }
 
-        if (cropModeActive || rotationModeActive || adjustmentModeActive || filterModeActive) {
-            Log.d(TAG, "Cannot enter eraser mode. Editor mode is active.")
+        if (isAnotherEditorModeActive()) {
+            Log.d(TAG, "Cannot enter $modeName mode. Editor mode is active.")
             return false
         }
 
-        annotationController.setAnnotationType(AnnotationType.ERASER)
-        activeAnnotationType = AnnotationType.ERASER
-        freehandModeActive = false
-        eraserModeActive = true
+        annotationController.setAnnotationType(annotationType)
+        activeAnnotationType = annotationType
+        freehandModeActive = annotationType != AnnotationType.ERASER
+        eraserModeActive = annotationType == AnnotationType.ERASER
         annotationSelectionVisible = true
+        resetAnnotationInteractionState()
+        selectElement(null)
+
+        Log.d(TAG, "$modeName mode entered")
+        invalidate()
+        return true
+    }
+
+    /** Returns true when another editor mode currently owns the canvas. */
+    private fun isAnotherEditorModeActive(): Boolean {
+        return cropModeActive ||
+                rotationModeActive ||
+                adjustmentModeActive ||
+                filterModeActive
+    }
+
+    /**
+     * Clears only transient annotation interaction state.
+     *
+     * Persistent annotations and their history are intentionally untouched.
+     */
+    private fun resetAnnotationInteractionState() {
         activeAnnotationPath = null
         activeAnnotationPointCount = 0
         activeEraserPoint = null
         lastEraserImagePoint = null
         resetElementGestureState()
-        selectElement(null)
-        Log.d(TAG, "Eraser mode entered")
-        invalidate()
-        return true
     }
 
     /**
@@ -2240,6 +2174,43 @@ class PhotoEditorView @JvmOverloads constructor(
         invalidate()
     }
     fun getElements(): List<EditorElement> = elements
+
+    /**
+     * Returns the number of editable layers currently in the editor.
+     *
+     * The existing elements list is the single source of truth for layer
+     * ordering. No separate layer collection is maintained.
+     */
+    fun getLayerCount(): Int = elements.size
+
+    /**
+     * Returns the editor element at the requested layer index.
+     *
+     * Layer ordering follows the existing elements list:
+     *
+     * - index 0 = bottom-most layer
+     * - last index = top-most layer
+     *
+     * Returns null when the index is outside the current layer range.
+     */
+    fun getLayer(index: Int): EditorElement? {
+        return elements.getOrNull(index)
+    }
+
+    /**
+     * Returns the current layer index of the supplied editor element.
+     *
+     * Returns -1 when the element is not currently part of the editor.
+     *
+     * Layer ordering follows the existing elements list:
+     *
+     * - index 0 = bottom-most layer
+     * - last index = top-most layer
+     */
+    fun getLayerIndex(element: EditorElement): Int {
+        return elements.indexOf(element)
+    }
+
     fun clearElements() {
         clearAnnotationHistory()
         elements.forEach {
@@ -4032,6 +4003,17 @@ class PhotoEditorView @JvmOverloads constructor(
         ) {
             drawAnnotationSelectionHandles(canvas, selectedAnnotation)
         }
+
+        /*
+         * CROP MODE
+         *
+         * The crop selection must be rendered after the normal editor content
+         * so the outside area is dimmed and the crop border/grid/handles stay
+         * visible above every editor element.
+         */
+        if (cropModeActive) {
+            drawCropSelection(canvas)
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -4187,6 +4169,19 @@ class PhotoEditorView @JvmOverloads constructor(
                     return true
                 }
             }
+        }
+
+        /*
+         * CROP MODE
+         *
+         * CropController owns crop handle detection, movement and resizing.
+         * Crop touches must be handled before GestureDetector, ScaleGestureDetector,
+         * and normal element interaction; otherwise the crop gesture falls through
+         * to the regular editor pipeline and the crop rectangle cannot be changed.
+         */
+        if (cropModeActive) {
+            cropController.handleTouch(event)
+            return true
         }
 
         /*
