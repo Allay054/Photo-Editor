@@ -203,4 +203,22 @@ class AnnotationElement(
     ) {
         path.offset(dx, dy)
     }
+
+    // =========================================================================
+    // LAYER DUPLICATION - PHASE 10.4
+    // =========================================================================
+
+    /** Creates an independent copy for layer duplication. */
+    override fun duplicate(): AnnotationElement {
+        return AnnotationElement(
+            annotationType = annotationType,
+            path = Path(path),
+            color = color,
+            strokeWidth = strokeWidth
+        ).also { copy ->
+            copy.isSelected = false
+            copy.isVisible = true
+        }
+    }
+
 }

@@ -1227,6 +1227,18 @@ class TextElement(
         canvas.restore()
     }
     // =========================================================================
+    // LAYER DUPLICATION - PHASE 10.4
+    // =========================================================================
+
+    /** Creates an independent copy for layer duplication. */
+    override fun duplicate(): TextElement {
+        return copyForCropSession().also { copy ->
+            copy.isSelected = false
+            copy.isVisible = true
+        }
+    }
+
+    // =========================================================================
     // CROP SESSION COPY
     // =========================================================================
 
@@ -1245,6 +1257,7 @@ class TextElement(
             alignment = alignment
         ).also { copy ->
             copy.isSelected = isSelected
+            copy.isVisible = isVisible
             copy.backgroundEnabled = backgroundEnabled
             copy.backgroundColor = backgroundColor
             copy.backgroundPadding = backgroundPadding
@@ -1254,3 +1267,4 @@ class TextElement(
     }
 
 }
+

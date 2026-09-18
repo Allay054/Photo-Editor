@@ -235,6 +235,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnLayerBringForward: Button
     private lateinit var btnLayerSendBackward: Button
     private lateinit var btnLayerSendToBack: Button
+    private lateinit var btnLayerDuplicate: Button
+    private lateinit var btnLayerDelete: Button
+    private lateinit var btnLayerVisibility: Button
+    private lateinit var btnLayerLock: Button
     private lateinit var btnLayerClose: Button
 
     private lateinit var rotationToolsScroll: View
@@ -443,6 +447,10 @@ class MainActivity : AppCompatActivity() {
         btnLayerBringForward = findViewById(R.id.btnLayerBringForward)
         btnLayerSendBackward = findViewById(R.id.btnLayerSendBackward)
         btnLayerSendToBack = findViewById(R.id.btnLayerSendToBack)
+        btnLayerDuplicate = findViewById(R.id.btnLayerDuplicate)
+        btnLayerDelete = findViewById(R.id.btnLayerDelete)
+        btnLayerVisibility = findViewById(R.id.btnLayerVisibility)
+        btnLayerLock = findViewById(R.id.btnLayerLock)
         btnLayerClose = findViewById(R.id.btnLayerClose)
 
         rotationToolsScroll = findViewById(R.id.rotationToolsScroll)
@@ -647,6 +655,62 @@ class MainActivity : AppCompatActivity() {
         btnLayerSendToBack.setOnClickListener {
             reorderSelectedLayer { photoEditorView.sendSelectedElementToBack() }
         }
+        btnLayerDuplicate.setOnClickListener {
+            if (photoEditorView.duplicateSelectedElement()) {
+                updateLayerPanel()
+                Toast.makeText(this, "Layer duplicated", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Select a layer to duplicate", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        btnLayerDelete.setOnClickListener {
+            val selected = photoEditorView.getSelectedElement()
+            if (selected == null) {
+                Toast.makeText(this, "Select a layer to delete", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val oldCount = photoEditorView.getLayerCount()
+            photoEditorView.deleteSelectedElement()
+
+            if (photoEditorView.getLayerCount() < oldCount) {
+                updateLayerPanel()
+                Toast.makeText(this, "Layer deleted", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Layer could not be deleted", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        btnLayerVisibility.setOnClickListener {
+            val selected = photoEditorView.getSelectedElement()
+            if (selected == null) {
+                Toast.makeText(this, "Select a layer first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.toggleSelectedElementVisibility()) {
+                updateLayerPanel()
+                val state = if (selected.isVisible) "shown" else "hidden"
+                Toast.makeText(this, "Layer $state", Toast.LENGTH_SHORT).show()
+            }
+        }
+        btnLayerLock.setOnClickListener {
+            val selected = photoEditorView.getSelectedElement()
+            if (selected == null) {
+                Toast.makeText(this, "Select a layer first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (photoEditorView.toggleSelectedElementLock()) {
+                updateLayerPanel()
+                val state = if (selected.isLocked) "locked" else "unlocked"
+                Toast.makeText(this, "Layer $state", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Layer lock could not be changed", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         btnLayerClose.setOnClickListener { closeLayerPanel() }
 
         // ---------------------------------------------------------------------
@@ -2452,42 +2516,130 @@ class MainActivity : AppCompatActivity() {
         if (!::layerListContainer.isInitialized) return
 
         layerListContainer.removeAllViews()
+
         val layerCount = photoEditorView.getLayerCount()
         val selectedElement = photoEditorView.getSelectedElement()
 
-        btnLayerBringToFront.isEnabled = selectedElement != null
-        btnLayerBringForward.isEnabled = selectedElement != null
-        btnLayerSendBackward.isEnabled = selectedElement != null
-        btnLayerSendToBack.isEnabled = selectedElement != null
+        // ---------------------------------------------------------------------
+        // SELECTED-LAYER ACTIONS
+        // ---------------------------------------------------------------------
+
+        val hasSelection = selectedElement != null
+
+        btnLayerBringToFront.isEnabled = hasSelection
+        btnLayerBringForward.isEnabled = hasSelection
+        btnLayerSendBackward.isEnabled = hasSelection
+        btnLayerSendToBack.isEnabled = hasSelection
+        btnLayerDuplicate.isEnabled = hasSelection
+        btnLayerDelete.isEnabled = hasSelection
+        btnLayerVisibility.isEnabled = hasSelection
+        btnLayerVisibility.text =
+            if (selectedElement?.isVisible == false) {
+                "Show Layer"
+            } else {
+                "Hide Layer"
+            }
+
+        btnLayerLock.isEnabled = hasSelection
+        btnLayerLock.text =
+            if (selectedElement?.isLocked == true) {
+                "Unlock Layer"
+            } else {
+                "Lock Layer"
+            }
 
         if (layerCount == 0) {
             layerListContainer.addView(TextView(this).apply {
                 text = "No layers yet"
                 textSize = 14f
-                setPadding(16, 16, 16, 16)
+                setTextColor(Color.LTGRAY)
+                gravity = android.view.Gravity.CENTER
+                setPadding(12, 20, 12, 20)
             })
             return
         }
 
-        // Display top-most first. The editor's actual list remains bottom -> top.
+        // ---------------------------------------------------------------------
+        // LAYER LIST
+        // ---------------------------------------------------------------------
+        //
+        // The editor stores layers bottom -> top.
+        // The panel displays them top -> bottom so the visual order matches
+        // what the user sees on the canvas.
+        //
+        // Each row clearly communicates:
+        //   ✓ selected state
+        //   👁 visibility state
+        //   🔒 lock state
+        //
+        // Selection is still performed by tapping anywhere on the row.
+        // ---------------------------------------------------------------------
+
         for (index in layerCount - 1 downTo 0) {
             val element = photoEditorView.getLayer(index) ?: continue
             val selected = element === selectedElement
-            val typeName = element::class.simpleName ?: "Element"
+
+            val typeName = when (element) {
+                is TextElement -> "Text"
+                is ShapeElement -> element.shapeType.name
+                    .lowercase()
+                    .replace('_', ' ')
+                    .replaceFirstChar { it.uppercase() }
+                else -> element::class.simpleName ?: "Element"
+            }
+
+            val visibilityIcon =
+                if (element.isVisible) "👁" else "◌"
+
+            val lockIcon =
+                if (element.isLocked) "🔒" else "🔓"
+
+            val selectedPrefix =
+                if (selected) "✓ " else ""
+
             val button = Button(this).apply {
-                text = if (selected) "✓ Layer ${index + 1} • $typeName" else "Layer ${index + 1} • $typeName"
+                text = "$selectedPrefix${index + 1}. $typeName    $visibilityIcon  $lockIcon"
+
                 isAllCaps = false
                 textSize = 13f
-                minHeight = 44
+                minHeight = 48
+                minimumHeight = 48
                 setPadding(10, 0, 10, 0)
+
+                // Make the selected layer immediately obvious without adding
+                // another drawable/resource file.
+                if (selected) {
+                    setTextColor(Color.WHITE)
+                    setBackgroundColor(Color.rgb(65, 65, 65))
+                } else {
+                    setTextColor(Color.LTGRAY)
+                }
+
+                contentDescription =
+                    buildString {
+                        append(if (selected) "Selected " else "")
+                        append("Layer ${index + 1}, $typeName, ")
+                        append(if (element.isVisible) "visible" else "hidden")
+                        append(", ")
+                        append(if (element.isLocked) "locked" else "unlocked")
+                    }
+
                 setOnClickListener {
-                    if (photoEditorView.selectLayer(index)) updateLayerPanel()
+                    if (photoEditorView.selectLayer(index)) {
+                        updateLayerPanel()
+                    }
                 }
             }
-            layerListContainer.addView(button, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = 6 })
+
+            layerListContainer.addView(
+                button,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = 6
+                }
+            )
         }
     }
 

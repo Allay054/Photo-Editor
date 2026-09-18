@@ -714,26 +714,152 @@ Phase 9 adds annotation and drawing capabilities while preserving the existing i
 
 # Phase 10 — Layers
 
-* [ ] Layer management
-* [ ] Layer ordering
-* [ ] Bring to front
-* [ ] Send to back
-* [ ] Layer visibility
-* [ ] Layer selection
+Phase 10 introduces layer management for Text, Shape, and Annotation elements while preserving the existing editor functionality.
+
+## 10.1 — Layer Foundation
+
+* [x] Layer management foundation
+* [x] Layer list panel
+* [x] Layer representation for editor elements
+* [x] Selected layer tracking
+
+## 10.2 — Layer Ordering
+
+* [x] Bring selected layer to front
+* [x] Bring selected layer forward
+* [x] Send selected layer backward
+* [x] Send selected layer to back
+* [x] Preserve element rendering order
+
+## 10.3 — Layer Selection
+
+* [x] Select layer from layer panel
+* [x] Synchronize layer selection with canvas selection
+* [x] Preserve selected element state
+* [x] Support Text, Shape, and Annotation layers
+
+## 10.4 — Duplicate & Delete
+
+* [x] Duplicate selected element
+* [x] Duplicate selected layer
+* [x] Delete selected element from layer panel
+* [x] Delete duplicated elements safely
+* [x] Preserve existing canvas delete behavior
+
+## 10.5 — Layer Visibility
+
+* [x] Hide selected layer
+* [x] Show hidden layer
+* [x] Visibility state in layer panel
+* [x] Hidden elements remain manageable from layers
+* [x] Preserve visibility during layer operations
+
+## 10.6 — Layer Lock / Unlock
+
+* [x] Lock selected layer
+* [x] Unlock selected layer
+* [x] Prevent movement of locked elements
+* [x] Prevent resizing of locked elements
+* [x] Prevent rotation of locked elements
+* [x] Prevent accidental deletion of locked elements
+* [x] Keep locked layers selectable from the layer panel
+* [x] Support hidden + locked state combinations
+* [x] Restore editing after unlock
+
+## 10.7 — Layer Panel UX
+
+* [x] Clear selected layer indication
+* [x] Visibility indicator
+* [x] Lock indicator
+* [x] Improved layer names
+* [x] Clear layer ordering
+* [x] Larger layer selection targets
+* [x] Improved layer panel readability
+* [x] Preserve Duplicate / Delete / Hide-Show / Lock-Unlock actions
+
+### Phase 10 Status
+
+**✅ COMPLETED**
+
+> Phase 10 is complete through Layer Panel UX. Layer management, ordering, selection, duplication, deletion, visibility, locking, and layer-panel usability are implemented and manually verified.
 
 ---
 
 # Phase 11 — Undo / Redo
 
-* [ ] Undo
-* [ ] Redo
-* [ ] Editor history
-* [ ] History management
-* [ ] Transformation history
+Phase 11 will introduce a centralized editor history system so users can safely undo and redo editor operations across the existing editing features.
+
+## 11.1 — History Foundation
+
+* [ ] Editor history model
+* [ ] History entry representation
+* [ ] Centralized undo / redo state
+* [ ] History stack management
+* [ ] Maximum history size protection
+* [ ] Safe history reset
+
+## 11.2 — Undo
+
+* [ ] Undo last editor operation
+* [ ] Restore previous editor state
+* [ ] Safe undo when history is empty
+* [ ] Update Undo button state
+* [ ] Preserve current selection where possible
+
+## 11.3 — Redo
+
+* [ ] Redo previously undone operation
+* [ ] Safe redo when history is empty
+* [ ] Clear redo history after a new edit
+* [ ] Update Redo button state
+
+## 11.4 — Element History
+
+* [ ] Text creation / deletion history
+* [ ] Text movement history
+* [ ] Text resize / rotation history
+* [ ] Shape creation / deletion history
+* [ ] Shape movement history
+* [ ] Shape resize / rotation history
+* [ ] Annotation creation / deletion history
+* [ ] Annotation movement / transformation history
+* [ ] Duplicate / delete history
+* [ ] Hide / show history
+* [ ] Lock / unlock history
+* [ ] Layer ordering history
+
+## 11.5 — Image Editing History
+
 * [ ] Crop history
-* [ ] Text editing history
+* [ ] Transform history
+* [ ] Filter history
 * [ ] Adjustment history
-* [ ] Annotation history
+* [ ] Apply / Cancel state safety
+* [ ] Preserve editor elements across image history operations
+
+## 11.6 — Annotation History Integration
+
+* [ ] Integrate existing annotation Undo / Redo with editor history
+* [ ] Preserve gesture-level annotation history
+* [ ] Preserve Blur history
+* [ ] Preserve Pixelate history
+* [ ] Prevent duplicate history entries
+
+## 11.7 — History UX
+
+* [ ] Undo button
+* [ ] Redo button
+* [ ] Disabled state when unavailable
+* [ ] Clear history on new image
+* [ ] Safe history handling during mode transitions
+* [ ] Prevent conflicting operations
+* [ ] History interaction regression testing
+
+### Phase 11 Status
+
+**⏳ IN PROGRESS**
+
+> Phase 11 should be implemented incrementally. Existing Text, Shape, Annotation, Crop, Transform, Filter, Adjustment, and Layer functionality must remain stable throughout the history implementation.
 
 ---
 
@@ -817,8 +943,8 @@ Phase 9 adds annotation and drawing capabilities while preserving the existing i
 | Phase 7 — Image Adjustments       | ✅ Completed    |
 | Phase 8 — Shapes                  | ✅ Completed    |
 | Phase 9 — Annotation              | ✅ Completed    |
-| Phase 10 — Layers                 | ⏳ Planned      |
-| Phase 11 — Undo / Redo            | ⏳ Planned      |
+| Phase 10 — Layers                 | ✅ Completed    |
+| Phase 11 — Undo / Redo            | ⏳ In Progress  |
 | Phase 12 — Save / Export          | ⏳ Planned      |
 | Phase 13 — Share                  | ⏳ Planned      |
 | Phase 14 — UI / UX                | ⏳ Planned      |
@@ -1024,27 +1150,24 @@ Testing includes:
 
 # 📌 Current Development Checkpoint
 
-**Phase 9 — Annotation: ✅ COMPLETED**
+**Phase 10 — Layers: ✅ COMPLETED
 
-Phase 9 is complete, including:
+Phase 10 is complete, including:
 
-* Annotation foundation
-* Freehand drawing
-* Pen
-* Highlighter
-* Eraser
-* Blur
-* Pixelate
-* Annotation color and stroke-size controls
-* Annotation selection and movement
-* Annotation deletion
-* Annotation Undo / Redo
-* Annotation Apply / Commit
-* Annotation Cancel
-* Annotation toolbar integration
-* Annotation state safety
+* Layer management
+* Layer ordering
+* Bring to front / send to back
+* Layer selection
+* Duplicate / delete
+* Hide / show
+* Lock / unlock
+* Locked element interaction safety
+* Improved layer panel UX
+* Visibility and lock indicators
+* Clear selected-layer indication
+* Improved layer names
 
-Previously completed image, text, crop, transform, filter, adjustment, and shape functionality remains preserved.
+Previously completed image, text, crop, transform, filter, adjustment, shape, and annotation functionality remains preserved.
 
 The editor architecture has also completed its incremental refactor:
 
@@ -1057,9 +1180,9 @@ The editor architecture has also completed its incremental refactor:
 
 The next development task is:
 
-> **Phase 10 — Layers**
+> **Phase 11 — Undo / Redo**
 
-Phase 10 will introduce layer management and ordering while preserving the existing editor functionality.
+Phase 11 will introduce centralized editor history and Undo / Redo while preserving all existing editor functionality.
 
 # 📦 Git Checkpoints
 
@@ -1115,6 +1238,20 @@ Phase 9.11 - Annotation History
 Phase 9.12 - Annotation Toolbar
 Phase 9.13 - Apply / Commit
 Phase 9.14 - Annotation State Safety & UX
+Phase 10.1 - Layer Foundation
+Phase 10.2 - Layer Ordering
+Phase 10.3 - Layer Selection
+Phase 10.4 - Duplicate & Delete
+Phase 10.5 - Layer Visibility
+Phase 10.6 - Layer Lock / Unlock
+Phase 10.7 - Layer Panel UX
+Phase 11.1 - History Foundation
+Phase 11.2 - Undo
+Phase 11.3 - Redo
+Phase 11.4 - Element History
+Phase 11.5 - Image Editing History
+Phase 11.6 - Annotation History Integration
+Phase 11.7 - History UX
 ```
 
 This makes it easier to track development progress and safely return to a previous stable implementation.
@@ -1123,11 +1260,11 @@ This makes it easier to track development progress and safely return to a previo
 
 # 📈 Project Status
 
-**Current Phase:** Phase 9 — Annotation: ✅ COMPLETED
+**Current Phase:** Phase 11 — Undo / Redo: ⏳ IN PROGRESS
 
-**Current Task:** Phase 9 completed and ready for Git checkpoint
+**Current Task:** Phase 11.1 — History Foundation
 
-**Completed Phases:** 1–9
+**Completed Phases:** 1–10
 
 **Crop Status:** ✅ Completed
 
@@ -1143,7 +1280,7 @@ This makes it easier to track development progress and safely return to a previo
 
 **PhotoEditorView Optimization:** ✅ Completed through Optimization 6
 
-**Next Milestone:** Phase 10 — Layers
+**Next Milestone:** Phase 11 — Undo / Redo
 
 ## 🎯 Development Philosophy
 

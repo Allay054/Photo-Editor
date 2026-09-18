@@ -962,4 +962,26 @@ class ShapeElement(
 
         return result
     }
+    // =========================================================================
+    // LAYER DUPLICATION - PHASE 10.4
+    // =========================================================================
+
+    /** Creates an independent copy for layer duplication. */
+    override fun duplicate(): ShapeElement {
+        return ShapeElement(
+            shapeType = shapeType,
+            position = PointF(position.x, position.y),
+            width = width,
+            height = height,
+            color = color,
+            strokeWidth = strokeWidth,
+            isFilled = isFilled,
+            rotation = rotation,
+            scale = scale
+        ).also { copy ->
+            copy.isSelected = false
+            copy.isVisible = true
+        }
+    }
+
 }

@@ -805,6 +805,10 @@ class PhotoEditorView @JvmOverloads constructor(
                         selectElement(
                             tappedElement
                         )
+                        if (tappedElement.isLocked) {
+                            Log.d(TAG, "Text edit ignored: element is locked")
+                            return true
+                        }
                         Log.d( TAG, "Opening text editor for: " + tappedElement.text )
                         onEditTextRequested?.invoke(
                             tappedElement
@@ -2234,6 +2238,112 @@ class PhotoEditorView @JvmOverloads constructor(
      * index 0 is the bottom-most layer and the last index is the top-most.
      * The selected element remains selected after reordering.
      */
+    /**
+     * Duplicates the selected element and inserts the duplicate immediately
+     * above the original in the existing layer list.
+     */
+    fun duplicateSelectedElement(): Boolean {
+        if (rotationModeActive || cropModeActive) {
+            Log.d(TAG, "Duplicate ignored: editor mode is active")
+            return false
+        }
+
+        val element = selectedElement ?: return false
+        val currentIndex = elements.indexOf(element)
+        if (currentIndex < 0) {
+            Log.w(TAG, "Duplicate ignored: selected element not found")
+            return false
+        }
+
+        val duplicate = element.duplicate()
+        // A duplicated layer is an active, visible layer even when the source
+        // layer was hidden from the Layers panel.
+        duplicate.isVisible = true
+
+        element.isSelected = false
+        duplicate.isSelected = true
+        elements.add(currentIndex + 1, duplicate)
+        selectedElement = duplicate
+        transformMode = TransformMode.NONE
+
+        Log.d(TAG, "Element duplicated. Original index=$currentIndex, duplicate index=${currentIndex + 1}, total=${elements.size}")
+        notifySelectionChanged()
+        invalidate()
+        return true
+    }
+
+    /**
+     * Toggles visibility of the currently selected layer.
+     *
+     * Hidden layers stay in the existing elements list so their layer order
+     * and data are preserved. The layer can be shown again from the Layers panel.
+     */
+    fun toggleSelectedElementVisibility(): Boolean {
+        if (rotationModeActive || cropModeActive) {
+            Log.d(TAG, "Visibility change ignored: editor mode is active")
+            return false
+        }
+
+        val element = selectedElement ?: return false
+        if (!elements.contains(element)) return false
+
+        element.isVisible = !element.isVisible
+        element.isSelected = element.isVisible
+
+        Log.d(TAG, "Layer visibility changed: visible=${element.isVisible}")
+        notifySelectionChanged()
+        invalidate()
+        return true
+    }
+
+    /**
+     * Toggles the lock state of the currently selected layer.
+     *
+     * Locked elements remain in the layer stack and can still be selected
+     * from the Layers panel. Canvas editing operations are blocked while
+     * layer ordering remains available.
+     */
+    fun toggleSelectedElementLock(): Boolean {
+        if (rotationModeActive || cropModeActive) {
+            Log.d(TAG, "Lock change ignored: editor mode is active")
+            return false
+        }
+
+        val element = selectedElement ?: return false
+        if (!elements.contains(element)) return false
+
+        element.isLocked = !element.isLocked
+        transformMode = TransformMode.NONE
+        isMovingElement = false
+
+        Log.d(TAG, "Layer lock changed: locked=${element.isLocked}")
+        notifySelectionChanged()
+        invalidate()
+        return true
+    }
+
+    /**
+     * Sets the lock state of the selected layer.
+     */
+    fun setSelectedElementLocked(locked: Boolean): Boolean {
+        if (rotationModeActive || cropModeActive) {
+            Log.d(TAG, "Lock change ignored: editor mode is active")
+            return false
+        }
+
+        val element = selectedElement ?: return false
+        if (!elements.contains(element)) return false
+
+        element.isLocked = locked
+        transformMode = TransformMode.NONE
+        isMovingElement = false
+
+        Log.d(TAG, "Layer lock set: locked=$locked")
+        notifySelectionChanged()
+        invalidate()
+        return true
+    }
+
     fun bringSelectedElementToFront(): Boolean {
         val element = selectedElement ?: return false
         val currentIndex = elements.indexOf(element)
@@ -2610,6 +2720,12 @@ class PhotoEditorView @JvmOverloads constructor(
         for (index in elements.indices.reversed()) {
             val element = elements[index]
 
+            // Hidden layers remain available in the Layers panel but cannot
+            // be selected or interacted with directly on the canvas.
+            if (!element.isVisible) {
+                continue
+            }
+
             if (element is AnnotationElement) {
                 if (isPointNearAnnotation(element, imageX, imageY)) {
                     return element
@@ -2808,6 +2924,11 @@ class PhotoEditorView @JvmOverloads constructor(
     }
     private fun startShapeRotation(touchX: Float, touchY: Float) {
         val shape = selectedElement as? ShapeElement ?: return
+        if (shape.isLocked) {
+            Log.d(TAG, "Shape rotation ignored: element is locked")
+            transformMode = TransformMode.NONE
+            return
+        }
         transformMode = TransformMode.ROTATE
         initialRotation = shape.rotation
         val center = imageToScreen(shape.position.x, shape.position.y) ?: return
@@ -2833,6 +2954,11 @@ class PhotoEditorView @JvmOverloads constructor(
     }
     private fun startShapeResize(touchX: Float, touchY: Float) {
         val shape = selectedElement as? ShapeElement ?: return
+        if (shape.isLocked) {
+            Log.d(TAG, "Shape resize ignored: element is locked")
+            transformMode = TransformMode.NONE
+            return
+        }
         transformMode = TransformMode.RESIZE
         initialElementScale = shape.scale
         val center = imageToScreen(shape.position.x, shape.position.y) ?: return
@@ -3281,6 +3407,11 @@ class PhotoEditorView @JvmOverloads constructor(
         val element =
             selectedElement as? TextElement
                 ?: return
+        if (element.isLocked) {
+            Log.d(TAG, "Text rotation ignored: element is locked")
+            transformMode = TransformMode.NONE
+            return
+        }
         transformMode =
             TransformMode.ROTATE
         initialRotation =
@@ -3351,6 +3482,11 @@ class PhotoEditorView @JvmOverloads constructor(
         val element =
             selectedElement as? TextElement
                 ?: return
+        if (element.isLocked) {
+            Log.d(TAG, "Text resize ignored: element is locked")
+            transformMode = TransformMode.NONE
+            return
+        }
         transformMode =
             TransformMode.RESIZE
         initialElementScale =
@@ -3413,6 +3549,11 @@ class PhotoEditorView @JvmOverloads constructor(
         val element =
             selectedElement
                 ?: return
+
+        if (element.isLocked) {
+            Log.d(TAG, "Delete ignored: selected element is locked")
+            return
+        }
         Log.d( TAG, "Deleting selected element" )
 
         val annotationHistoryBeforeDelete =
@@ -3693,7 +3834,7 @@ class PhotoEditorView @JvmOverloads constructor(
         val blurAnnotations = elements
             .asSequence()
             .filterIsInstance<AnnotationElement>()
-            .filter { it.annotationType == AnnotationType.BLUR }
+            .filter { it.annotationType == AnnotationType.BLUR && it.isVisible }
             .toList()
 
         if (blurAnnotations.isEmpty()) return
@@ -3732,7 +3873,7 @@ class PhotoEditorView @JvmOverloads constructor(
         val pixelateAnnotations = elements
             .asSequence()
             .filterIsInstance<AnnotationElement>()
-            .filter { it.annotationType == AnnotationType.PIXELATE }
+            .filter { it.annotationType == AnnotationType.PIXELATE && it.isVisible }
             .toList()
 
         if (pixelateAnnotations.isEmpty()) return
@@ -4060,9 +4201,10 @@ class PhotoEditorView @JvmOverloads constructor(
         // only those effect elements from the normal element renderer. Every
         // existing Text/Shape/Freehand/Pen/Highlighter/Blur element remains
         // on the existing rendering pipeline.
-        val drawableElements = elements.filterNot { element ->
-            element is AnnotationElement &&
-                    element.annotationType == AnnotationType.PIXELATE
+        val drawableElements = elements.filter { element ->
+            element.isVisible &&
+                    !(element is AnnotationElement &&
+                            element.annotationType == AnnotationType.PIXELATE)
         }
 
         editorRenderer.drawElements(
@@ -4150,6 +4292,7 @@ class PhotoEditorView @JvmOverloads constructor(
             event.actionMasked == MotionEvent.ACTION_DOWN &&
             event.pointerCount == 1 &&
             selectedElement is AnnotationElement &&
+            selectedElement?.isLocked != true &&
             isOnAnnotationDeleteHandle(event.x, event.y)
         ) {
             Log.d(TAG, "Annotation delete handle touched")
@@ -4246,7 +4389,7 @@ class PhotoEditorView @JvmOverloads constructor(
                         resetElementGestureState()
                         selectElement(tappedAnnotation)
                         isDragging = true
-                        isMovingElement = true
+                        isMovingElement = !tappedAnnotation.isLocked
                         lastTouchX = event.x
                         lastTouchY = event.y
                         return true
@@ -4324,6 +4467,47 @@ class PhotoEditorView @JvmOverloads constructor(
                 lastTouchY = event.y
                 isDragging = true
                 transformMode = TransformMode.NONE
+
+                /*
+                 * A locked layer can still be selected and reordered from the
+                 * Layers panel, but it cannot be edited through canvas gestures.
+                 *
+                 * IMPORTANT: the resize/rotate/delete handles sit outside the
+                 * element bounds, so checking only findElementAt() is not enough.
+                 * Block the selected locked element's body AND all of its floating
+                 * handles before the normal handle pipeline gets a chance to start.
+                 *
+                 * Tapping a different element is still allowed so the user can
+                 * switch selection away from the locked layer.
+                 */
+                if (selectedElement?.isLocked == true) {
+                    val imagePoint = screenToImage(event.x, event.y)
+                    val touchedElement = imagePoint?.let {
+                        findElementAt(it.x, it.y)
+                    }
+
+                    val touchedSelectedLockedElement =
+                        touchedElement === selectedElement
+
+                    val touchedLockedHandle =
+                        (selectedElement is ShapeElement &&
+                                (isOnShapeDeleteHandle(event.x, event.y) ||
+                                        isOnShapeRotationHandle(event.x, event.y) ||
+                                        isOnShapeResizeHandle(event.x, event.y))) ||
+                                (selectedElement is TextElement &&
+                                        (isOnTextDeleteHandle(event.x, event.y) ||
+                                                isOnRotationHandle(event.x, event.y) ||
+                                                isOnResizeHandle(event.x, event.y))) ||
+                                (selectedElement is AnnotationElement &&
+                                        isOnAnnotationDeleteHandle(event.x, event.y))
+
+                    if (touchedSelectedLockedElement || touchedLockedHandle) {
+                        isMovingElement = false
+                        transformMode = TransformMode.NONE
+                        Log.d(TAG, "Locked element interaction ignored on canvas")
+                        return true
+                    }
+                }
 
                 /*
                  * CHECK FLOATING DELETE ACTIONS FIRST
@@ -4436,7 +4620,8 @@ class PhotoEditorView @JvmOverloads constructor(
                  */
                 if (
                     transformMode == TransformMode.ROTATE &&
-                    event.pointerCount == 1
+                    event.pointerCount == 1 &&
+                    selectedElement?.isLocked != true
                 ) {
                     if (selectedElement is ShapeElement) {
                         updateShapeRotation(event.x, event.y)
@@ -4454,7 +4639,8 @@ class PhotoEditorView @JvmOverloads constructor(
                  */
                 if (
                     transformMode == TransformMode.RESIZE &&
-                    event.pointerCount == 1
+                    event.pointerCount == 1 &&
+                    selectedElement?.isLocked != true
                 ) {
                     if (selectedElement is ShapeElement) {
                         updateShapeResize(event.x, event.y)
@@ -4476,7 +4662,11 @@ class PhotoEditorView @JvmOverloads constructor(
                     !scaleGestureDetector.isInProgress &&
                     isDragging
                 ) {
-                    if (isMovingElement && selectedElement != null) {
+                    if (
+                        isMovingElement &&
+                        selectedElement != null &&
+                        !selectedElement!!.isLocked
+                    ) {
                         /*
                          * MOVE ELEMENT
                          */

@@ -28,7 +28,7 @@
     <!-- ================================================================ -->
     <LinearLayout
         android:id="@+id/layerPanel"
-        android:layout_width="190dp"
+        android:layout_width="240dp"
         android:layout_height="0dp"
         android:layout_marginTop="12dp"
         android:layout_marginEnd="8dp"
@@ -78,6 +78,46 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
         </ScrollView>
+
+        <Button
+            android:id="@+id/btnLayerDuplicate"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:text="Duplicate"
+            android:textAllCaps="false"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btnLayerDelete"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:text="Delete Layer"
+            android:textAllCaps="false"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btnLayerVisibility"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:text="Hide Layer"
+            android:textAllCaps="false"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btnLayerLock"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:text="Lock Layer"
+            android:textAllCaps="false"
+            android:textSize="12sp" />
 
         <TextView
             android:layout_width="match_parent"

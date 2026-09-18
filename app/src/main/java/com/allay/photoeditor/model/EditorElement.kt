@@ -12,6 +12,21 @@ sealed class EditorElement {
     var isSelected: Boolean = false
 
     /**
+     * True when this element is visible on the canvas.
+     * Hidden elements remain in the layer stack and can be managed from the Layers panel.
+     */
+    var isVisible: Boolean = true
+
+    /**
+     * True when this element is locked.
+     *
+     * Locked elements remain visible and can still be selected from the Layers panel,
+     * but canvas editing operations such as move, resize, rotate and delete are blocked.
+     * Layer ordering remains available.
+     */
+    var isLocked: Boolean = false
+
+    /**
      * Draws the element using the editor's
      * image -> screen transformation matrix.
      */
@@ -41,4 +56,9 @@ sealed class EditorElement {
         dx: Float,
         dy: Float
     )
+
+    /**
+     * Creates an independent copy of this element for layer duplication.
+     */
+    abstract fun duplicate(): EditorElement
 }
