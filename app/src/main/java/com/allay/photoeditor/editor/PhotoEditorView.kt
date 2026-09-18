@@ -42,6 +42,7 @@ import com.allay.photoeditor.editor.gesture.EditorTapGestureController
 import com.allay.photoeditor.editor.crop.CropController
 import com.allay.photoeditor.editor.crop.EditorCropOperations
 import com.allay.photoeditor.editor.drawing.EditorRenderer
+import com.allay.photoeditor.editor.export.EditorExportController
 import com.allay.photoeditor.editor.history.EditorHistoryCoordinator
 import com.allay.photoeditor.editor.transform.EditorImageTransformOperations
 import com.allay.photoeditor.editor.transform.TransformController
@@ -915,6 +916,17 @@ class PhotoEditorView @JvmOverloads constructor(
     )
 
     /**
+     * Creates final image-resolution bitmaps without touching editor state.
+     */
+    private val exportController = EditorExportController(
+        getBitmap = { bitmap },
+        elements = elementStore.elements,
+        editorRenderer = editorRenderer,
+        annotationEffectController = annotationEffectController,
+        bitmapPaint = bitmapPaint
+    )
+
+    /**
      * Owns selection-handle geometry, hit testing and selection-handle
      * rendering. PhotoEditorView keeps the public APIs and gesture pipeline.
      */
@@ -1188,6 +1200,14 @@ class PhotoEditorView @JvmOverloads constructor(
         invalidate()
     }
     fun getCurrentBitmap(): Bitmap? = bitmap
+
+    /**
+     * Generates the final editor bitmap at the original image resolution.
+     *
+     * Export does not modify the editor bitmap, elements, selection, viewport
+     * state, or global Undo/Redo history.
+     */
+    fun exportFinalBitmap(): Bitmap? = exportController.createFinalBitmap()
     /**
      * Applies all current annotation effects directly to the editor bitmap.
      *

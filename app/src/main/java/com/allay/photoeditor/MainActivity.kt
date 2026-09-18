@@ -3,15 +3,19 @@ package com.allay.photoeditor
 import android.app.AlertDialog
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.content.ContentValues
 import android.content.res.ColorStateList
 import android.graphics.PointF
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.provider.MediaStore
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioButton
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -28,6 +32,7 @@ import com.allay.photoeditor.model.ShapeType
 import com.allay.photoeditor.model.TextElement
 import com.allay.photoeditor.editor.shape.ShapeController
 import com.allay.photoeditor.editor.annotation.AnnotationController
+import com.allay.photoeditor.editor.export.ExportFormat
 import com.allay.photoeditor.utils.ColorPickerDialog
 import com.allay.photoeditor.utils.StrokeWidthPickerDialog
 
@@ -64,6 +69,12 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var btnRedo:
             Button
+
+    private lateinit var btnSave:
+            Button
+
+    // Number of global undo steps at the last saved state.
+    private var savedUndoCount = 0
 
     private lateinit var btnSelectImage:
             Button
@@ -352,6 +363,11 @@ class MainActivity : AppCompatActivity() {
                 R.id.btnRedo
             )
 
+        btnSave =
+            findViewById(
+                R.id.btnSave
+            )
+
         btnSelectImage =
             findViewById(
                 R.id.btnSelectImage
@@ -548,10 +564,12 @@ class MainActivity : AppCompatActivity() {
         photoEditorView.onHistoryChanged = {
             runOnUiThread {
                 updateHistoryButtons()
+                updateSaveButton()
             }
         }
 
         updateHistoryButtons()
+        updateSaveButton()
 
         layerPanel.visibility = View.GONE
         updateLayerPanel()
@@ -606,6 +624,336 @@ class MainActivity : AppCompatActivity() {
     }
 
     // -------------------------------------------------------------------------
+    // EXPORT - PHASE 12.3 FORMAT & QUALITY
+    // -------------------------------------------------------------------------
+
+    private fun showExportDialog(
+        onSaved: (() -> Unit)? = null
+    ) {
+        if (photoEditorView.getCurrentBitmap() == null) {
+            Toast.makeText(
+                this,
+                "Please select an image first",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 0)
+        }
+
+        val formatTitle = TextView(this).apply {
+            text = "Format"
+            textSize = 16f
+            setPadding(0, 8, 0, 8)
+        }
+
+        val pngRadio = RadioButton(this).apply {
+            text = "PNG (lossless)"
+            isChecked = true
+        }
+
+        val jpegRadio = RadioButton(this).apply {
+            text = "JPEG"
+        }
+
+        val qualityLabel = TextView(this).apply {
+            text = "JPEG Quality: 95"
+            textSize = 14f
+            setPadding(0, 12, 0, 4)
+        }
+
+        val qualitySeekBar = SeekBar(this).apply {
+            // SeekBar progress remains API-21 compatible.
+            // 0..90 maps to JPEG quality 10..100.
+            max = 90
+            progress = 85
+            isEnabled = false
+        }
+
+        container.addView(formatTitle)
+        container.addView(pngRadio)
+        container.addView(jpegRadio)
+        container.addView(qualityLabel)
+        container.addView(qualitySeekBar)
+
+        fun updateQualityEnabled() {
+            val jpegSelected = jpegRadio.isChecked
+            qualitySeekBar.isEnabled = jpegSelected
+            qualityLabel.isEnabled = jpegSelected
+        }
+
+        pngRadio.setOnClickListener {
+            pngRadio.isChecked = true
+            jpegRadio.isChecked = false
+            updateQualityEnabled()
+        }
+
+        jpegRadio.setOnClickListener {
+            pngRadio.isChecked = false
+            jpegRadio.isChecked = true
+            updateQualityEnabled()
+        }
+
+        qualitySeekBar.setOnSeekBarChangeListener(
+            object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(
+                    seekBar: SeekBar?,
+                    progress: Int,
+                    fromUser: Boolean
+                ) {
+                    qualityLabel.text =
+                        "JPEG Quality: ${progress + 10}"
+                }
+
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+
+                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+            }
+        )
+
+        updateQualityEnabled()
+
+        AlertDialog.Builder(this)
+            .setTitle("Export Image")
+            .setView(container)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val format =
+                    if (jpegRadio.isChecked) {
+                        ExportFormat.JPEG
+                    } else {
+                        ExportFormat.PNG
+                    }
+
+                val quality =
+                    (qualitySeekBar.progress + 10).coerceIn(10, 100)
+
+                if (saveEditedImage(format, quality)) {
+                    savedUndoCount = photoEditorView.undoCount()
+                    updateSaveButton()
+                    onSaved?.invoke()
+                }
+            }
+            .show()
+    }
+
+    private fun saveEditedImage(
+        format: ExportFormat,
+        jpegQuality: Int = 95
+    ): Boolean {
+        if (photoEditorView.getCurrentBitmap() == null) {
+            Toast.makeText(
+                this,
+                "Please select an image first",
+                Toast.LENGTH_SHORT
+            ).show()
+            return false
+        }
+
+        val exportedBitmap = photoEditorView.exportFinalBitmap()
+
+        if (exportedBitmap == null) {
+            Toast.makeText(
+                this,
+                "Unable to export image",
+                Toast.LENGTH_SHORT
+            ).show()
+            return false
+        }
+
+        val safeQuality = jpegQuality.coerceIn(10, 100)
+        val isJpeg = format == ExportFormat.JPEG
+
+        val extension = if (isJpeg) "jpg" else "png"
+        val mimeType = if (isJpeg) "image/jpeg" else "image/png"
+        val compressFormat =
+            if (isJpeg) {
+                android.graphics.Bitmap.CompressFormat.JPEG
+            } else {
+                android.graphics.Bitmap.CompressFormat.PNG
+            }
+
+        val fileName =
+            "PhotoEditor_${System.currentTimeMillis()}.$extension"
+
+        var saveSucceeded = false
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(
+                        MediaStore.Images.Media.DISPLAY_NAME,
+                        fileName
+                    )
+                    put(
+                        MediaStore.Images.Media.MIME_TYPE,
+                        mimeType
+                    )
+                    put(
+                        MediaStore.Images.Media.RELATIVE_PATH,
+                        "Pictures/PhotoEditor"
+                    )
+                    put(
+                        MediaStore.Images.Media.IS_PENDING,
+                        1
+                    )
+                }
+
+                val uri = contentResolver.insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    values
+                )
+
+                if (uri == null) {
+                    Toast.makeText(
+                        this,
+                        "Unable to create image file",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return false
+                }
+
+                try {
+                    contentResolver.openOutputStream(uri)?.use { outputStream ->
+                        if (!exportedBitmap.compress(
+                                compressFormat,
+                                if (isJpeg) safeQuality else 100,
+                                outputStream
+                            )
+                        ) {
+                            throw IllegalStateException(
+                                "Bitmap compression failed"
+                            )
+                        }
+                    } ?: throw IllegalStateException(
+                        "Unable to open output stream"
+                    )
+
+                    val completedValues = ContentValues().apply {
+                        put(
+                            MediaStore.Images.Media.IS_PENDING,
+                            0
+                        )
+                    }
+
+                    contentResolver.update(
+                        uri,
+                        completedValues,
+                        null,
+                        null
+                    )
+
+                    Toast.makeText(
+                        this,
+                        "Image saved to Pictures/PhotoEditor",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                    saveSucceeded = true
+                } catch (exception: Exception) {
+                    contentResolver.delete(uri, null, null)
+                    throw exception
+                }
+            } else {
+                val picturesDirectory =
+                    getExternalFilesDir(
+                        android.os.Environment.DIRECTORY_PICTURES
+                    )
+
+                if (picturesDirectory == null) {
+                    throw IllegalStateException(
+                        "Pictures directory unavailable"
+                    )
+                }
+
+                val photoEditorDirectory =
+                    java.io.File(
+                        picturesDirectory,
+                        "PhotoEditor"
+                    ).apply {
+                        if (!exists()) {
+                            mkdirs()
+                        }
+                    }
+
+                val outputFile =
+                    java.io.File(
+                        photoEditorDirectory,
+                        fileName
+                    )
+
+                outputFile.outputStream().use { outputStream ->
+                    if (!exportedBitmap.compress(
+                            compressFormat,
+                            if (isJpeg) safeQuality else 100,
+                            outputStream
+                        )
+                    ) {
+                        throw IllegalStateException(
+                            "Bitmap compression failed"
+                        )
+                    }
+                }
+
+                Toast.makeText(
+                    this,
+                    "Image saved to app Pictures/PhotoEditor",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                saveSucceeded = true
+            }
+        } catch (exception: Exception) {
+            Log.e(
+                TAG,
+                "Failed to save exported image",
+                exception
+            )
+
+            Toast.makeText(
+                this,
+                "Failed to save image",
+                Toast.LENGTH_SHORT
+            ).show()
+        } finally {
+            if (!exportedBitmap.isRecycled) {
+                exportedBitmap.recycle()
+            }
+        }
+
+        return saveSucceeded
+    }
+
+    // -------------------------------------------------------------------------
+    // BACK / FINISH
+    // -------------------------------------------------------------------------
+
+    override fun onBackPressed() {
+        super.onBackPressed()
+        if (!hasUnsavedChanges()) {
+            finish()
+            return
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Unsaved changes")
+            .setMessage("Do you want to save your changes before leaving?")
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Discard") { _, _ ->
+                finish()
+            }
+            .setPositiveButton("Save") { _, _ ->
+                showExportDialog {
+                    finish()
+                }
+            }
+            .show()
+    }
+
+    // -------------------------------------------------------------------------
     // WINDOW INSETS
     // -------------------------------------------------------------------------
 
@@ -653,6 +1001,14 @@ class MainActivity : AppCompatActivity() {
             if (!photoEditorView.redo()) {
                 updateHistoryButtons()
             }
+        }
+
+        // ---------------------------------------------------------------------
+        // EXPORT - PHASE 12.3 FORMAT & QUALITY
+        // ---------------------------------------------------------------------
+
+        btnSave.setOnClickListener {
+            showExportDialog()
         }
 
         // ---------------------------------------------------------------------
@@ -2486,6 +2842,19 @@ class MainActivity : AppCompatActivity() {
     // GLOBAL UNDO / REDO - PHASE 11.7
     // -------------------------------------------------------------------------
 
+    private fun updateSaveButton() {
+        val hasUnsavedChanges =
+            photoEditorView.getCurrentBitmap() != null &&
+                    photoEditorView.undoCount() != savedUndoCount
+
+        btnSave.visibility =
+            if (hasUnsavedChanges) View.VISIBLE else View.GONE
+    }
+
+    private fun hasUnsavedChanges(): Boolean =
+        photoEditorView.getCurrentBitmap() != null &&
+                photoEditorView.undoCount() != savedUndoCount
+
     private fun updateHistoryButtons() {
         val canUndo = photoEditorView.canUndo()
         val canRedo = photoEditorView.canRedo()
@@ -2495,6 +2864,8 @@ class MainActivity : AppCompatActivity() {
 
         btnUndo.alpha = if (canUndo) 1f else 0.45f
         btnRedo.alpha = if (canRedo) 1f else 0.45f
+
+        updateSaveButton()
 
         btnUndo.contentDescription =
             if (canUndo) "Undo last edit" else "Undo unavailable"
