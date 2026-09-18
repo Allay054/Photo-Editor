@@ -29,18 +29,20 @@ import com.allay.photoeditor.editor.annotation.AnnotationHistoryController
 import com.allay.photoeditor.editor.annotation.AnnotationInteractionController
 import com.allay.photoeditor.editor.annotation.EditorAnnotationEffectController
 import com.allay.photoeditor.editor.annotation.EditorAnnotationModeController
-import com.allay.photoeditor.editor.history.EditorHistoryController
 import com.allay.photoeditor.editor.history.EditorStateSnapshot
 import com.allay.photoeditor.editor.layer.EditorLayerController
 import com.allay.photoeditor.editor.selection.EditorSelectionController
 import com.allay.photoeditor.editor.selection.EditorSelectionHandleController
 import com.allay.photoeditor.editor.core.EditorElementStore
+import com.allay.photoeditor.editor.core.EditorElementOperations
 import com.allay.photoeditor.editor.core.EditorCoordinateMapper
 import com.allay.photoeditor.editor.text.TextElementController
 import com.allay.photoeditor.editor.gesture.ElementGestureController
 import com.allay.photoeditor.editor.gesture.EditorTapGestureController
 import com.allay.photoeditor.editor.crop.CropController
+import com.allay.photoeditor.editor.crop.EditorCropOperations
 import com.allay.photoeditor.editor.drawing.EditorRenderer
+import com.allay.photoeditor.editor.history.EditorHistoryCoordinator
 import com.allay.photoeditor.editor.transform.EditorImageTransformOperations
 import com.allay.photoeditor.editor.transform.TransformController
 import com.allay.photoeditor.editor.viewport.EditorPanController
@@ -191,6 +193,52 @@ class PhotoEditorView @JvmOverloads constructor(
     private var activeCropHandle: CropHandle
         get() = cropController.currentHandle
         set(value) = cropController.setActiveHandleState(value)
+
+
+    /**
+     * Creates the element copies required by CropController's temporary
+     * session snapshot. The crop interaction/session itself remains owned by
+     * CropController; PhotoEditorView supplies the existing element-copy
+     * behavior.
+     */
+    private fun createCropSessionElementsSnapshot(): List<EditorElement> {
+        return elementStore.elements.map { element ->
+            when (element) {
+                is TextElement -> element.copyForCropSession()
+                else -> element
+            }
+        }
+    }
+
+    /**
+     * Returns the selected element index for the current Crop session.
+     */
+    private fun getSelectedElementIndexForCropSession(): Int =
+        elementStore.elements.indexOf(selectedElementInternal)
+
+
+    private val cropOperations = EditorCropOperations(
+        tag = TAG,
+        cropController = cropController,
+        elementStore = elementStore,
+        getBitmap = { bitmap },
+        setBitmap = { bitmap = it },
+        getSelectedElement = { selectedElementInternal },
+        setSelectedElement = { selectedElementInternal = it },
+        resetElementGestureState = ::resetElementGestureState,
+        resetTransform = ::resetTransform,
+        notifySelectionChanged = ::notifySelectionChanged,
+        captureHistoryState = { captureEditorState(includeBitmap = true) },
+        recordHistory = { before, after ->
+            recordEditorHistory(
+                before = before,
+                after = after
+            )
+        },
+        onCropModeChanged = { onCropModeChanged },
+        invalidate = ::invalidate,
+        minCropSize = MIN_CROP_SIZE
+    )
     /** Owns the temporary transform session. */
     private val transformController = TransformController(
         getBitmap = { bitmap },
@@ -319,25 +367,36 @@ class PhotoEditorView @JvmOverloads constructor(
         AnnotationHistoryController()
 
     /**
-     * Global editor Undo / Redo history.
-     *
-     * Phase 11.1:
-     * - owns editor-level history stacks
-     * - remains separate from the existing annotation-only history
-     * - does not yet automatically record every editor operation
-     *
-     * Operation recording is integrated incrementally in Phase 11.2+.
-     */
-    private val editorHistoryController =
-        EditorHistoryController()
-
-    /**
      * Snapshot captured when an annotation gesture starts.
      *
      * Used to store one Undo operation per complete drawing/eraser gesture.
      */
     private var annotationHistoryBeforeGesture:
             AnnotationHistoryController.State? = null
+
+    private val elementOperations = EditorElementOperations(
+        tag = TAG,
+        elementStore = elementStore,
+        getSelectedElement = { selectedElementInternal },
+        setSelectedElement = { selectedElementInternal = it },
+        setTransformModeNone = {
+            transformMode = TransformMode.NONE
+        },
+        captureHistoryState = { captureEditorState(includeBitmap = true) },
+        recordHistory = { before, after ->
+            recordEditorHistory(
+                before = before,
+                after = after
+            )
+        },
+        notifySelectionChanged = ::notifySelectionChanged,
+        invalidate = ::invalidate,
+        annotationHistoryController = annotationHistoryController,
+        onAnnotationHistoryChanged = {
+            onAnnotationHistoryChanged?.invoke()
+        },
+        getBitmap = { bitmap }
+    )
 
     private var initialRotation = 0f
     private var initialRotationAngle = 0f
@@ -719,7 +778,7 @@ class PhotoEditorView @JvmOverloads constructor(
         setSelectedElement = { selectedElementInternal = it },
         selectElement = ::selectElement,
         isEditorModeActive = { rotationModeActive || cropModeActive },
-        captureHistoryState = { captureEditorState() },
+        captureHistoryState = { captureEditorState(includeBitmap = true) },
         recordHistory = { before, after ->
             recordEditorHistory(
                 before = before,
@@ -912,6 +971,41 @@ class PhotoEditorView @JvmOverloads constructor(
      * public annotation APIs and delegates drawing/eraser interaction to the
      * existing AnnotationInteractionController.
      */
+    /**
+     * Owns global editor history snapshots, restoration, recording and
+     * Undo/Redo while PhotoEditorView keeps the public history API.
+     */
+    private val historyCoordinator = EditorHistoryCoordinator(
+        tag = TAG,
+        elementStore = elementStore,
+        getBitmap = { bitmap },
+        setBitmap = { bitmap = it },
+        getSelectedElement = { selectedElementInternal },
+        setSelectedElement = { selectedElementInternal = it },
+        resetEditorInteraction = {
+            transformMode = TransformMode.NONE
+            isMovingElement = false
+            isDragging = false
+        },
+        clearBitmapCaches = {
+            annotationEffectController.clearCaches()
+        },
+        notifySelectionChanged = ::notifySelectionChanged,
+        invalidate = ::invalidate,
+        prepareForHistoryRestore = {
+            if (freehandModeActive || eraserModeActive) {
+                finishActiveFreehandPath(commit = false)
+                cancelAnnotationHistoryGesture()
+                annotationModeController.exit()
+                annotationInteractionController.clearEraserState()
+            }
+            resetElementGestureState()
+        },
+        onHistoryChanged = {
+            onHistoryChanged?.invoke()
+        }
+    )
+
     private val annotationModeController = EditorAnnotationModeController()
 
 
@@ -942,7 +1036,7 @@ class PhotoEditorView @JvmOverloads constructor(
 
     private val textElementController = TextElementController(
         elements = elementStore.elements,
-        captureHistoryState = { captureEditorState() },
+        captureHistoryState = { captureEditorState(includeBitmap = true) },
         recordHistory = { before, after ->
             recordEditorHistory(
                 before = before,
@@ -973,7 +1067,7 @@ class PhotoEditorView @JvmOverloads constructor(
         getSelectedElement = { selectedElementInternal },
         findElementAt = ::findElementAt,
         selectElement = ::selectElement,
-        captureHistoryState = { captureEditorState() },
+        captureHistoryState = { captureEditorState(includeBitmap = true) },
         recordHistory = { before, after ->
             recordEditorHistory(
                 before = before,
@@ -1349,413 +1443,32 @@ class PhotoEditorView @JvmOverloads constructor(
      * are implemented in the following Phase 5 steps.
      */
     fun enterCropMode() {
-        if (rotationModeActive) {
-            Log.d(TAG, "Cannot enter crop mode while rotation mode is active")
-            return
-        }
-        if (bitmap == null) {
-            Log.d( TAG, "Cannot enter crop mode. No image selected." )
-            return
-        }
-        // Capture the complete editor state before changing selection state.
-        // This snapshot is used by Cancel Crop.
-        cropController.beginSession()
-        // Deselect any active editor element while crop mode is active.
-        selectedElementInternal?.isSelected = false
-        selectedElementInternal = null
-        // Reset element gesture state.
-        resetElementGestureState()
-        // Start every new crop session in Free Crop mode.
-        cropAspectRatio = CropAspectRatio.FREE
-        // Start with the complete image selected.
-        initializeCropRect()
-        // Activate crop mode.
-        cropModeActive = true
-        Log.d( TAG, "Crop mode entered" )
-        notifySelectionChanged()
-        onCropModeChanged?.invoke(true)
-        invalidate()
+        cropOperations.enter()
     }
-    /**
-     * Applies the current crop selection to the image.
-     *
-     * The crop rectangle is stored in original image coordinates, so the
-     * bitmap is cropped directly using those coordinates. Existing editor
-     * elements are kept and their positions are shifted by the crop origin.
-     * Elements whose position falls outside the new image are removed.
-     *
-     * This does not call setImage(), because setImage() intentionally clears
-     * all editor elements when a completely new image is loaded.
-     */
+
     fun applyCrop() {
-        val currentBitmap = bitmap
-        val cropRect = cropRectImage
-        if (currentBitmap == null) {
-            Log.w( TAG, "Cannot apply crop. No image selected." )
-            return
-        }
-        if (!cropModeActive || cropRect == null) {
-            Log.w( TAG, "Cannot apply crop. Crop mode is not active." )
-            return
-        }
-        val left = cropRect.left
-            .coerceIn(0f, currentBitmap.width.toFloat())
-            .toInt()
-        val top = cropRect.top
-            .coerceIn(0f, currentBitmap.height.toFloat())
-            .toInt()
-        val right = cropRect.right
-            .coerceIn(0f, currentBitmap.width.toFloat())
-            .toInt()
-        val bottom = cropRect.bottom
-            .coerceIn(0f, currentBitmap.height.toFloat())
-            .toInt()
-        val cropWidth = right - left
-        val cropHeight = bottom - top
-        if (
-            cropWidth <= 0 ||
-            cropHeight <= 0
-        ) {
-            Log.w( TAG, "Cannot apply crop. Invalid crop size: " + "${cropWidth}x${cropHeight}" )
-            return
-        }
-        if (
-            cropWidth < MIN_CROP_SIZE.toInt() ||
-            cropHeight < MIN_CROP_SIZE.toInt()
-        ) {
-            Log.w( TAG, "Cannot apply crop. Crop is smaller than minimum size: " + "${cropWidth}x${cropHeight}" )
-            return
-        }
-        val isFullImage =
-            left == 0 &&
-                    top == 0 &&
-                    right == currentBitmap.width &&
-                    bottom == currentBitmap.height
-
-        val historyBefore = if (!isFullImage) {
-            captureEditorState(includeBitmap = true)
-        } else {
-            null
-        }
-
-        if (!isFullImage) {
-            val croppedBitmap = Bitmap.createBitmap(
-                currentBitmap,
-                left,
-                top,
-                cropWidth,
-                cropHeight
-            )
-            bitmap = croppedBitmap
-        }
-        // Move editor elements into the new image coordinate system.
-        // Elements that do not intersect the crop area are removed.
-        if (!isFullImage) {
-            val cropBounds = RectF(
-                left.toFloat(),
-                top.toFloat(),
-                right.toFloat(),
-                bottom.toFloat()
-            )
-            val iterator = elementStore.elements.iterator()
-            while (iterator.hasNext()) {
-                val element = iterator.next()
-                val elementBounds = element.getBounds()
-                if (!RectF.intersects(
-                        cropBounds,
-                        elementBounds
-                    )
-                ) {
-                    element.isSelected = false
-                    if (selectedElementInternal === element) {
-                        selectedElementInternal = null
-                    }
-                    iterator.remove()
-                    continue
-                }
-                element.moveBy(
-                    -left.toFloat(),
-                    -top.toFloat()
-                )
-            }
-        }
-        selectedElementInternal = null
-        resetElementGestureState()
-        activeCropHandle = CropHandle.NONE
-        cropRectImage = null
-        cropAspectRatio = CropAspectRatio.FREE
-        cropModeActive = false
-        cropController.clearSession()
-        resetTransform()
-        notifySelectionChanged()
-        onCropModeChanged?.invoke(false)
-        if (historyBefore != null) {
-            recordEditorHistory(
-                before = historyBefore,
-                after = captureEditorState(includeBitmap = true)
-            )
-        }
-
-        Log.d( TAG, "Crop applied: ${cropWidth}x${cropHeight}, " + "origin=($left,$top), " + "elements=${elementStore.elements.size}" )
-        invalidate()
+        cropOperations.apply()
     }
-    /**
-     * Resets the active crop selection to the full current image while
-     * keeping the editor in Crop Mode.
-     *
-     * Reset is intentionally different from Cancel:
-     * - Reset keeps the current crop session active.
-     * - Cancel restores the complete state from before Crop Mode started.
-     */
+
     fun resetCrop() {
-        if (!cropModeActive) {
-            Log.d( TAG, "Reset crop ignored: crop mode is not active" )
-            return
-        }
-        val currentBitmap = bitmap
-        if (currentBitmap == null) {
-            Log.w( TAG, "Reset crop ignored: bitmap is missing" )
-            return
-        }
-        cropAspectRatio = CropAspectRatio.FREE
-        cropRectImage = RectF(
-            0f,
-            0f,
-            currentBitmap.width.toFloat(),
-            currentBitmap.height.toFloat()
-        )
-        activeCropHandle = CropHandle.NONE
-        resetElementGestureState()
-        resetTransform()
-        Log.d( TAG, "Crop reset to full image: " + "${currentBitmap.width}x${currentBitmap.height}" )
-        invalidate()
+        cropOperations.reset()
     }
-    /**
-     * Cancels the current crop session and restores the state captured when
-     * crop mode was entered. This can be called at any time while crop mode
-     * is active.
-     */
+
     fun cancelCrop() {
-        if (!cropModeActive) {
-            Log.d( TAG, "Cancel crop ignored: crop mode is not active" )
-            return
-        }
-        val session = cropController.getSessionSnapshot()
-        if (session == null) {
-            Log.w( TAG, "Cancel crop failed: crop session snapshot is missing" )
-            exitCropModeWithoutRestore()
-            return
-        }
-        bitmap = session.bitmap
-        elementStore.elements.clear()
-        elementStore.elements.addAll(session.elements)
-        selectedElementInternal = session.elements.getOrNull(session.selectedIndex)
-        // Re-apply selection state exactly as it was before crop mode.
-        elementStore.elements.forEach { element ->
-            element.isSelected = element === selectedElementInternal
-        }
-        cropRectImage = null
-        cropAspectRatio = CropAspectRatio.FREE
-        cropModeActive = false
-        resetElementGestureState()
-        activeCropHandle = CropHandle.NONE
-        cropController.clearSession()
-        resetTransform()
-        notifySelectionChanged()
-        onCropModeChanged?.invoke(false)
-        Log.d( TAG, "Crop cancelled. Original image restored: " + "${session.bitmap?.width}x${session.bitmap?.height}, " + "elements=${elementStore.elements.size}" )
-        invalidate()
+        cropOperations.cancel()
     }
-    /**
-     * Keeps the existing public exit API but makes exiting crop mode safe: an
-     * exit from an active crop session is treated as Cancel Crop.
-     */
+
     fun exitCropMode() {
-        cancelCrop()
-    }
-    /**
-     * Restores only the crop interaction state when a snapshot is unavailable.
-     */
-    private fun exitCropModeWithoutRestore() {
-        cropRectImage = null
-        cropAspectRatio = CropAspectRatio.FREE
-        cropModeActive = false
-        resetElementGestureState()
-        activeCropHandle = CropHandle.NONE
-        cropController.clearSession()
-        notifySelectionChanged()
-        onCropModeChanged?.invoke(false)
-        invalidate()
-    }
-    /**
-     * Creates the element copies required by the CropController session
-     * snapshot. The controller owns the snapshot lifecycle; the View owns
-     * knowledge of how editor elements are copied.
-     */
-    private fun createCropSessionElementsSnapshot(): List<EditorElement> {
-        return elementStore.elements.map { element ->
-            when (element) {
-                is TextElement -> element.copyForCropSession()
-                else -> element
-            }
-        }
-    }
-    /** Returns the selected element index for the current Crop session. */
-    private fun getSelectedElementIndexForCropSession(): Int = elementStore.elements.indexOf(selectedElementInternal)
-    /**
-     * Returns true when crop mode is currently active.
-     */
-    fun isCropMode(): Boolean = cropModeActive
-    /**
-     * Rotates the current crop session 90 degrees clockwise.
-     *
-     * The bitmap is physically rotated so the change becomes part of the
-     * current crop session. The active crop rectangle and all editor
-     * elements are transformed into the rotated image coordinate system.
-     *
-     * The crop aspect-ratio mode itself is preserved. For fixed aspect-ratio
-     * modes the crop rectangle is normalized again against the rotated image.
-     * Cancel Crop can still restore the exact state that existed before the
-     * crop session started because the original bitmap/elements remain in the
-     * crop-session snapshot.
-     */
-    /**
-     * Applies the existing clockwise 90-degree image-coordinate transform to
-     * a TextElement while Crop Mode is active.
-     *
-     * This helper remains in PhotoEditorView because crop rotation is owned by
-     * CropController/session logic and is intentionally separate from the
-     * normal committed transform operations.
-     */
-    private fun transformTextForRotateRight90(
-        textElement: TextElement,
-        oldImageHeight: Float
-    ) {
-        val oldX = textElement.position.x
-        val oldY = textElement.position.y
-
-        textElement.position.x = oldImageHeight - oldY
-        textElement.position.y = oldX
-        textElement.rotation = normalizeRotation(
-            textElement.rotation + 90f
-        )
+        cropOperations.exit()
     }
 
-    private fun normalizeRotation(rotation: Float): Float {
-        var normalized = rotation
-
-        while (normalized < 0f) {
-            normalized += 360f
-        }
-
-        while (normalized >= 360f) {
-            normalized -= 360f
-        }
-
-        return normalized
-    }
+    fun isCropMode(): Boolean =
+        cropOperations.isActive()
 
     fun rotateCrop90Degrees() {
-        if (!cropModeActive) {
-            Log.d( TAG, "Rotate crop ignored: crop mode is not active" )
-            return
-        }
-        val currentBitmap = bitmap
-        val currentCropRect = cropRectImage
-        if (currentBitmap == null || currentCropRect == null) {
-            Log.w( TAG, "Rotate crop ignored: bitmap or crop rectangle is missing" )
-            return
-        }
-        val oldHeight = currentBitmap.height.toFloat()
-        try {
-            // Android's positive 90 degree rotation is clockwise.
-            val rotationMatrix = Matrix().apply {
-                postRotate(90f)
-            }
-            val rotatedBitmap = Bitmap.createBitmap(
-                currentBitmap,
-                0,
-                0,
-                currentBitmap.width,
-                currentBitmap.height,
-                rotationMatrix,
-                true
-            )
-            // -------------------------------------------------------------
-            // ROTATE CROP RECTANGLE
-            // -------------------------------------------------------------
-            // For a clockwise rotation: (x, y) -> (H - y, x).
-            val rotatedCropLeft =
-                oldHeight - currentCropRect.bottom
-            val rotatedCropTop =
-                currentCropRect.left
-            val rotatedCropRight =
-                oldHeight - currentCropRect.top
-            val rotatedCropBottom =
-                currentCropRect.right
-            // -------------------------------------------------------------
-            // ROTATE EDITOR ELEMENTS
-            // -------------------------------------------------------------
-            // TextElement position is its local/world origin. Move that origin
-            // using the same image-coordinate transform and add 90 degrees to
-            // its existing rotation so the text remains aligned with the image.
-            elementStore.elements.forEach { element ->
-                when (element) {
-                    is TextElement -> {
-                        transformTextForRotateRight90(
-                            textElement = element,
-                            oldImageHeight = oldHeight
-                        )
-                    }
-                    else -> Unit
-                }
-            }
-            bitmap = rotatedBitmap
-            currentCropRect.set(
-                rotatedCropLeft,
-                rotatedCropTop,
-                rotatedCropRight,
-                rotatedCropBottom
-            )
-            // Fixed aspect-ratio modes stay selected after rotation.
-            // Re-normalize the selection using the rotated bitmap dimensions.
-            when (cropAspectRatio) {
-                CropAspectRatio.FREE -> Unit
-                CropAspectRatio.ONE_TO_ONE -> {
-                    cropController.normalizeToAspectRatio(1f)
-                }
-                CropAspectRatio.FOUR_TO_THREE -> {
-                    cropController.normalizeToAspectRatio(4f / 3f)
-                }
-                CropAspectRatio.SIXTEEN_TO_NINE -> {
-                    cropController.normalizeToAspectRatio(16f / 9f)
-                }
-                CropAspectRatio.ORIGINAL_RATIO -> {
-                    cropController.normalizeToAspectRatio(
-                        rotatedBitmap.width.toFloat() / rotatedBitmap.height.toFloat()
-                    )
-                }
-            }
-            // A rotation changes the image dimensions, so any previous image
-            // transform may no longer be appropriate. Keep the crop session
-            // stable by fitting the rotated image back into the editor.
-            resetTransform()
-            activeCropHandle = CropHandle.NONE
-            resetElementGestureState()
-            Log.d(
-                TAG,
-                "Crop rotated 90 degrees clockwise: " +
-                        "${currentBitmap.width}x${currentBitmap.height} -> " +
-                        "${rotatedBitmap.width}x${rotatedBitmap.height}, " +
-                        "cropAspect=$cropAspectRatio, " +
-                        "cropRect=$currentCropRect, " +
-                        "elements=${elementStore.elements.size}"
-            )
-            invalidate()
-        } catch (exception: Exception) {
-            Log.e( TAG, "Failed to rotate crop 90 degrees", exception )
-        }
+        cropOperations.rotate90Degrees()
     }
+
     /** Starts a temporary non-destructive adjustment session. */
     fun enterAdjustmentMode() {
         if (cropModeActive || rotationModeActive || filterModeActive) {
@@ -1843,71 +1556,40 @@ class PhotoEditorView @JvmOverloads constructor(
      * corner can be moved without maintaining an aspect ratio.
      */
     fun setFreeCropMode() {
-        cropAspectRatio = CropAspectRatio.FREE
-        Log.d( TAG, "Free Crop mode selected" )
-        invalidate()
+        cropOperations.setFreeCropMode()
     }
-    /**
-     * Returns true when Free Crop mode is active.
-     */
-    fun isFreeCropMode(): Boolean = cropAspectRatio == CropAspectRatio.FREE
-    /**
-     * Selects 1:1 (square) crop mode.
-     */
+
+    fun isFreeCropMode(): Boolean =
+        cropOperations.isFreeCropMode()
+
     fun setOneToOneCropMode() {
-        cropAspectRatio = CropAspectRatio.ONE_TO_ONE
-        cropController.normalizeToAspectRatio(1f)
-        Log.d(TAG, "1:1 Crop mode selected")
-        invalidate()
+        cropOperations.setOneToOneCropMode()
     }
-    /**
-     * Returns true when 1:1 crop mode is active.
-     */
-    fun isOneToOneCropMode(): Boolean = cropAspectRatio == CropAspectRatio.ONE_TO_ONE
-    /**
-     * Enables 4:3 aspect-ratio crop mode.
-     */
+
+    fun isOneToOneCropMode(): Boolean =
+        cropOperations.isOneToOneCropMode()
+
     fun setFourToThreeCropMode() {
-        cropAspectRatio = CropAspectRatio.FOUR_TO_THREE
-        cropController.normalizeToAspectRatio(4f / 3f)
-        Log.d( TAG, "4:3 Crop mode selected" )
-        invalidate()
+        cropOperations.setFourToThreeCropMode()
     }
-    /**
-     * Returns true when 4:3 crop mode is active.
-     */
-    fun isFourToThreeCropMode(): Boolean = cropAspectRatio == CropAspectRatio.FOUR_TO_THREE
-    /**
-     * Enables 16:9 aspect-ratio crop mode.
-     */
+
+    fun isFourToThreeCropMode(): Boolean =
+        cropOperations.isFourToThreeCropMode()
+
     fun setSixteenToNineCropMode() {
-        cropAspectRatio = CropAspectRatio.SIXTEEN_TO_NINE
-        cropController.normalizeToAspectRatio(16f / 9f)
-        Log.d( TAG, "16:9 Crop mode selected" )
-        invalidate()
+        cropOperations.setSixteenToNineCropMode()
     }
-    /**
-     * Returns true when 16:9 crop mode is active.
-     */
-    fun isSixteenToNineCropMode(): Boolean = cropAspectRatio == CropAspectRatio.SIXTEEN_TO_NINE
-    /**
-     * Enables Original Ratio crop mode.
-     *
-     * The crop selection keeps the same aspect ratio as the original image.
-     */
+
+    fun isSixteenToNineCropMode(): Boolean =
+        cropOperations.isSixteenToNineCropMode()
+
     fun setOriginalRatioCropMode() {
-        val currentBitmap = bitmap ?: return
-        cropAspectRatio = CropAspectRatio.ORIGINAL_RATIO
-        cropController.normalizeToAspectRatio(
-            currentBitmap.width.toFloat() / currentBitmap.height.toFloat()
-        )
-        Log.d( TAG, "Original Ratio Crop mode selected" )
-        invalidate()
+        cropOperations.setOriginalRatioCropMode()
     }
-    /**
-     * Returns true when Original Ratio crop mode is active.
-     */
-    fun isOriginalRatioCropMode(): Boolean = cropAspectRatio == CropAspectRatio.ORIGINAL_RATIO
+
+    fun isOriginalRatioCropMode(): Boolean =
+        cropOperations.isOriginalRatioCropMode()
+
     fun getImageWidth(): Int = bitmap?.width ?: 0
     fun getImageHeight(): Int = bitmap?.height ?: 0
     private fun resetTransform() {
@@ -1982,225 +1664,71 @@ class PhotoEditorView @JvmOverloads constructor(
 
     fun addElement(
         element: EditorElement
-    ) {
-        val historyBefore = captureEditorState()
+    ) = elementOperations.addElement(element)
 
-        /*
-         * Deselect previous element.
-         */
-        selectedElementInternal?.isSelected = false
-        /*
-         * New element becomes selected.
-         */
-        element.isSelected = true
-        selectedElementInternal = element
-        elementStore.elements.add(
-            element
-        )
-        Log.d( TAG, "Element added. Total elements: " + elementStore.elements.size )
-        notifySelectionChanged()
-        invalidate()
-
-        recordEditorHistory(
-            before = historyBefore,
-            after = captureEditorState()
-        )
-    }
     fun getElements(): List<EditorElement> = elementStore.elements
+
+    fun deleteSelectedElement() {
+        if (rotationModeActive || cropModeActive) {
+            Log.d(TAG, "Delete ignored: editor mode is active")
+            return
+        }
+        elementOperations.deleteSelectedElement()
+    }
+
+    fun addTestText() {
+        if (!elementOperations.addTestText()) {
+            Log.d(TAG, "Cannot add text. No image selected.")
+        }
+    }
 
     // =========================================================================
     // GLOBAL EDITOR HISTORY - PHASE 11.1
     // =========================================================================
 
-    /**
-     * Captures the current editor state for the global Undo / Redo system.
-     *
-     * Element snapshots are independent copies. The current bitmap is optional
-     * for Phase 11.1 because image-operation history is integrated separately
-     * in Phase 11.3.
-     *
-     * Viewport state (zoom/pan) is intentionally not part of editor history.
-     */
+    /** Captures the current global editor state. */
     private fun captureEditorState(
         includeBitmap: Boolean = false
-    ): EditorStateSnapshot {
-        val elementCopies = elementStore.elements.map { element ->
-            element.duplicate().also { copy ->
-                copy.isSelected = false
-                copy.isVisible = element.isVisible
-                copy.isLocked = element.isLocked
-            }
-        }
+    ): EditorStateSnapshot =
+        historyCoordinator.capture(includeBitmap)
 
-        return EditorStateSnapshot(
-            elements = elementCopies,
-            selectedElementIndex = elementStore.elements.indexOf(selectedElementInternal),
-            bitmap = if (includeBitmap) {
-                bitmap?.let { currentBitmap ->
-                    currentBitmap.copy(
-                        currentBitmap.config ?: Bitmap.Config.ARGB_8888,
-                        true
-                    )
-                }
-            } else {
-                null
-            }
-        )
-    }
-
-    /**
-     * Restores a previously captured global editor state.
-     *
-     * Bitmap restoration is performed only when the snapshot contains a bitmap.
-     * This allows Phase 11.1 element history to be introduced without changing
-     * the existing image-operation pipeline.
-     */
+    /** Restores a previously captured global editor state. */
     private fun restoreEditorState(
         state: EditorStateSnapshot
     ) {
-        if (state.bitmap != null) {
-            bitmap = state.bitmap
-            annotationEffectController.clearCaches()
-        }
-
-        selectedElementInternal?.isSelected = false
-        elementStore.elements.clear()
-        elementStore.elements.addAll(
-            state.elements.map { element ->
-                element.duplicate().also { copy ->
-                    copy.isSelected = false
-                    copy.isVisible = element.isVisible
-                    copy.isLocked = element.isLocked
-                }
-            }
-        )
-
-        selectedElementInternal = elementStore.elements.getOrNull(
-            state.selectedElementIndex
-        )
-
-        elementStore.elements.forEach { element ->
-            element.isSelected = element === selectedElementInternal
-        }
-
-        transformMode = TransformMode.NONE
-        isMovingElement = false
-        isDragging = false
-
-        notifySelectionChanged()
-        invalidate()
+        historyCoordinator.restore(state)
     }
 
-    /**
-     * Records one completed editor operation.
-     *
-     * The current Phase 11.1 foundation stores the state that existed before
-     * the operation. Redo receives the current state at the moment Redo/Undo
-     * is requested. Operation-specific integration is added in later phases.
-     */
+    /** Records one completed global editor operation. */
     private fun recordEditorHistory(
         before: EditorStateSnapshot,
         after: EditorStateSnapshot
     ) {
-        editorHistoryController.record(
-            before = before,
-            after = after
-        )
-
-        onHistoryChanged?.invoke()
+        historyCoordinator.record(before, after)
     }
 
-    /**
-     * Undoes the most recent global editor operation.
-     *
-     * Annotation Undo remains separate and continues to use the existing
-     * AnnotationHistoryController until Phase 11.6 integrates the two systems.
-     */
-    fun undo(): Boolean {
-        if (freehandModeActive || eraserModeActive) {
-            finishActiveFreehandPath(commit = false)
-            cancelAnnotationHistoryGesture()
-            annotationModeController.exit()
-            annotationInteractionController.clearEraserState()
-            resetElementGestureState()
-        }
+    /** Undoes the most recent global editor operation. */
+    fun undo(): Boolean = historyCoordinator.undo()
 
-        val state = editorHistoryController.undo(
-            currentState = captureEditorState()
-        ) ?: return false
+    /** Redoes the most recently undone global editor operation. */
+    fun redo(): Boolean = historyCoordinator.redo()
 
-        restoreEditorState(state)
+    /** Returns true when a global editor Undo operation is available. */
+    fun canUndo(): Boolean = historyCoordinator.canUndo()
 
-        onHistoryChanged?.invoke()
+    /** Returns true when a global editor Redo operation is available. */
+    fun canRedo(): Boolean = historyCoordinator.canRedo()
 
-        Log.d(TAG, "Global editor undo performed")
-        return true
-    }
+    /** Returns the number of available global Undo operations. */
+    fun undoCount(): Int = historyCoordinator.undoCount()
 
-    /**
-     * Redoes the most recently undone global editor operation.
-     */
-    fun redo(): Boolean {
-        if (freehandModeActive || eraserModeActive) {
-            finishActiveFreehandPath(commit = false)
-            cancelAnnotationHistoryGesture()
-            annotationModeController.exit()
-            annotationInteractionController.clearEraserState()
-            resetElementGestureState()
-        }
+    /** Returns the number of available global Redo operations. */
+    fun redoCount(): Int = historyCoordinator.redoCount()
 
-        val state = editorHistoryController.redo(
-            currentState = captureEditorState()
-        ) ?: return false
-
-        restoreEditorState(state)
-
-        onHistoryChanged?.invoke()
-
-        Log.d(TAG, "Global editor redo performed")
-        return true
-    }
-
-    /**
-     * Returns true when a global editor Undo operation is available.
-     */
-    fun canUndo(): Boolean {
-        return editorHistoryController.canUndo()
-    }
-
-    /**
-     * Returns true when a global editor Redo operation is available.
-     */
-    fun canRedo(): Boolean {
-        return editorHistoryController.canRedo()
-    }
-
-    /**
-     * Returns the number of available global Undo operations.
-     */
-    fun undoCount(): Int {
-        return editorHistoryController.undoCount()
-    }
-
-    /**
-     * Returns the number of available global Redo operations.
-     */
-    fun redoCount(): Int {
-        return editorHistoryController.redoCount()
-    }
-
-    /**
-     * Clears global editor history without changing the current editor state.
-     *
-     * This is used when starting a new image/editor session and will also be
-     * used by later export/save history-safety integration.
-     */
+    /** Clears global editor history without changing the current editor state. */
     fun clearHistory() {
-        editorHistoryController.clear()
-        onHistoryChanged?.invoke()
-        Log.d(TAG, "Global editor history cleared")
+        historyCoordinator.clear()
     }
-
 
     /** Returns the number of editable layers currently in the editor. */
     fun getLayerCount(): Int = layerController.getLayerCount()
@@ -2399,78 +1927,6 @@ class PhotoEditorView @JvmOverloads constructor(
     private fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float =
         kotlin.math.hypot(x2 - x1, y2 - y1)
 
-    fun deleteSelectedElement() {
-        if (rotationModeActive || cropModeActive) {
-            Log.d(TAG, "Delete ignored: editor mode is active")
-            return
-        }
-        val element =
-            selectedElementInternal
-                ?: return
-
-        if (element.isLocked) {
-            Log.d(TAG, "Delete ignored: selected element is locked")
-            return
-        }
-        Log.d( TAG, "Deleting selected element" )
-
-        val historyBefore = captureEditorState()
-
-        val annotationHistoryBeforeDelete =
-            if (element is AnnotationElement) {
-                annotationHistoryController.capture(elementStore.elements)
-            } else {
-                null
-            }
-        elementStore.elements.remove(
-            element
-        )
-        element.isSelected = false
-        selectedElementInternal = null
-        transformMode = TransformMode.NONE
-        notifySelectionChanged()
-
-        if (annotationHistoryBeforeDelete != null) {
-            val annotationHistoryAfterDelete =
-                annotationHistoryController.capture(elementStore.elements)
-            annotationHistoryController.record(
-                before = annotationHistoryBeforeDelete,
-                after = annotationHistoryAfterDelete
-            )
-            onAnnotationHistoryChanged?.invoke()
-        }
-
-        invalidate()
-
-        recordEditorHistory(
-            before = historyBefore,
-            after = captureEditorState()
-        )
-    }
-    fun addTestText() {
-        if (
-            bitmap == null
-        ) {
-            Log.d( TAG, "Cannot add text. No image selected." )
-            return
-        }
-        val imageWidth =
-            bitmap!!.width.toFloat()
-        val imageHeight =
-            bitmap!!.height.toFloat()
-        val position =
-            PointF(imageWidth / 2f, imageHeight / 2f)
-        val textElement =
-            TextElement(
-                text = "Hello Photo Editor",
-                position = position,
-                textSize = 80f,
-                color = Color.WHITE
-            )
-        addElement(
-            textElement
-        )
-    }
     /** Starts a new freehand annotation path in image coordinates. */
     private fun startFreehandPath(screenX: Float, screenY: Float): Boolean {
         return annotationInteractionController.startFreehandPath(
