@@ -1338,6 +1338,35 @@
                 android:orientation="horizontal">
 
 
+                <!-- Global History - Phase 11.7 -->
+
+                <Button
+                    android:id="@+id/btnUndo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Undo"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnRedo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Redo"
+                    android:textAllCaps="false"
+                    android:textSize="14sp" />
+
+
                 <!-- Delete -->
 
                 <Button

@@ -59,6 +59,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var photoEditorView:
             PhotoEditorView
 
+    private lateinit var btnUndo:
+            Button
+
+    private lateinit var btnRedo:
+            Button
+
     private lateinit var btnSelectImage:
             Button
 
@@ -336,6 +342,16 @@ class MainActivity : AppCompatActivity() {
                 R.id.photoEditorView
             )
 
+        btnUndo =
+            findViewById(
+                R.id.btnUndo
+            )
+
+        btnRedo =
+            findViewById(
+                R.id.btnRedo
+            )
+
         btnSelectImage =
             findViewById(
                 R.id.btnSelectImage
@@ -529,6 +545,14 @@ class MainActivity : AppCompatActivity() {
 
         setupListeners()
 
+        photoEditorView.onHistoryChanged = {
+            runOnUiThread {
+                updateHistoryButtons()
+            }
+        }
+
+        updateHistoryButtons()
+
         layerPanel.visibility = View.GONE
         updateLayerPanel()
 
@@ -614,6 +638,22 @@ class MainActivity : AppCompatActivity() {
     // -------------------------------------------------------------------------
 
     private fun setupListeners() {
+
+        // ---------------------------------------------------------------------
+        // GLOBAL HISTORY - PHASE 11.7
+        // ---------------------------------------------------------------------
+
+        btnUndo.setOnClickListener {
+            if (!photoEditorView.undo()) {
+                updateHistoryButtons()
+            }
+        }
+
+        btnRedo.setOnClickListener {
+            if (!photoEditorView.redo()) {
+                updateHistoryButtons()
+            }
+        }
 
         // ---------------------------------------------------------------------
         // LAYERS - PHASE 10.2
@@ -2440,6 +2480,27 @@ class MainActivity : AppCompatActivity() {
          */
 
         updateDeleteButton()
+    }
+
+    // -------------------------------------------------------------------------
+    // GLOBAL UNDO / REDO - PHASE 11.7
+    // -------------------------------------------------------------------------
+
+    private fun updateHistoryButtons() {
+        val canUndo = photoEditorView.canUndo()
+        val canRedo = photoEditorView.canRedo()
+
+        btnUndo.isEnabled = canUndo
+        btnRedo.isEnabled = canRedo
+
+        btnUndo.alpha = if (canUndo) 1f else 0.45f
+        btnRedo.alpha = if (canRedo) 1f else 0.45f
+
+        btnUndo.contentDescription =
+            if (canUndo) "Undo last edit" else "Undo unavailable"
+
+        btnRedo.contentDescription =
+            if (canRedo) "Redo last edit" else "Redo unavailable"
     }
 
     // -------------------------------------------------------------------------

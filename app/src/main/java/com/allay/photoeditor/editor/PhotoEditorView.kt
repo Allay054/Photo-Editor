@@ -30,6 +30,8 @@ import com.allay.photoeditor.model.AnnotationElement
 import com.allay.photoeditor.model.AnnotationType
 import com.allay.photoeditor.editor.adjustment.AdjustmentController
 import com.allay.photoeditor.editor.annotation.AnnotationHistoryController
+import com.allay.photoeditor.editor.history.EditorHistoryController
+import com.allay.photoeditor.editor.history.EditorStateSnapshot
 import com.allay.photoeditor.editor.crop.CropController
 import com.allay.photoeditor.editor.drawing.EditorRenderer
 import com.allay.photoeditor.editor.transform.TransformController
@@ -220,7 +222,24 @@ class PhotoEditorView @JvmOverloads constructor(
     }
     /** Commits the current filter preview to the editor bitmap. */
     fun applyFilter() {
+        if (!filterModeActive) {
+            Log.d(TAG, "Apply filter ignored: filter mode is not active")
+            return
+        }
+
+        // Selecting Original leaves the committed bitmap unchanged, so there
+        // is no meaningful editor operation to add to global history.
+        if (getFilterType() == FilterType.ORIGINAL) {
+            filterController.apply()
+            return
+        }
+
+        val before = captureEditorState(includeBitmap = true)
         filterController.apply()
+        recordEditorHistory(
+            before = before,
+            after = captureEditorState(includeBitmap = true)
+        )
     }
     /** Discards the temporary filter preview and restores the session source. */
     fun cancelFilterMode() {
@@ -243,6 +262,19 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     private val annotationHistoryController =
         AnnotationHistoryController()
+
+    /**
+     * Global editor Undo / Redo history.
+     *
+     * Phase 11.1:
+     * - owns editor-level history stacks
+     * - remains separate from the existing annotation-only history
+     * - does not yet automatically record every editor operation
+     *
+     * Operation recording is integrated incrementally in Phase 11.2+.
+     */
+    private val editorHistoryController =
+        EditorHistoryController()
 
     /**
      * Snapshot captured when an annotation gesture starts.
@@ -686,6 +718,60 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     private val elements = mutableListOf<EditorElement>()
     private var selectedElement: EditorElement? = null
+
+    /**
+     * Global history snapshot captured at the beginning of one element gesture.
+     *
+     * One continuous move / resize / rotate gesture is recorded as one
+     * Undo operation rather than one operation per MotionEvent.ACTION_MOVE.
+     */
+    private var elementGestureHistoryBefore: EditorStateSnapshot? = null
+    private var elementGestureHistoryChanged = false
+
+    /**
+     * Global history snapshot for a temporary image-transform session.
+     *
+     * Flip/rotate operations can be combined before Apply, so the complete
+     * transform session is recorded as one global history operation.
+     */
+    private var transformHistoryBefore: EditorStateSnapshot? = null
+    private var transformHistoryChanged = false
+
+    /**
+     * Global history snapshot captured when an adjustment session is about to
+     * be committed. AdjustmentController invokes onAdjustmentsApplied only
+     * after the newest preview has actually been committed.
+     */
+    private var adjustmentHistoryBefore: EditorStateSnapshot? = null
+
+    private fun beginElementHistoryGesture() {
+        elementGestureHistoryBefore = captureEditorState()
+        elementGestureHistoryChanged = false
+    }
+
+    private fun markElementHistoryChanged() {
+        elementGestureHistoryChanged = true
+    }
+
+    private fun finishElementHistoryGesture() {
+        val before = elementGestureHistoryBefore
+            ?: return
+
+        if (elementGestureHistoryChanged) {
+            recordEditorHistory(
+                before = before,
+                after = captureEditorState()
+            )
+        }
+
+        elementGestureHistoryBefore = null
+        elementGestureHistoryChanged = false
+    }
+
+    private fun cancelElementHistoryGesture() {
+        elementGestureHistoryBefore = null
+        elementGestureHistoryChanged = false
+    }
     /**
      * Called whenever the selected element changes.
      */
@@ -718,12 +804,39 @@ class PhotoEditorView @JvmOverloads constructor(
      */
     var onAnnotationHistoryChanged:
             (() -> Unit)? = null
+
+    /**
+     * Called whenever global editor Undo/Redo availability changes.
+     *
+     * MainActivity uses this callback to keep the global History buttons
+     * synchronized with the editor history.
+     */
+    var onHistoryChanged:
+            (() -> Unit)? = null
     /** Owns temporary adjustment state and background preview processing. */
     private val adjustmentController = AdjustmentController(
         getSourceBitmap = { bitmap },
         setCommittedBitmap = { bitmap = it },
         resetGestureState = ::resetGestureState,
-        onModeChanged = { active -> onAdjustmentModeChanged?.invoke(active) },
+        onModeChanged = { active ->
+            onAdjustmentModeChanged?.invoke(active)
+
+            // AdjustmentController commits the bitmap before it reports that
+            // the session ended. This records history only after Apply has
+            // actually committed the newest preview. Cancel clears the pending
+            // snapshot first, so Cancel is never stored.
+            if (!active) {
+                val before = adjustmentHistoryBefore
+                adjustmentHistoryBefore = null
+
+                if (before != null) {
+                    recordEditorHistory(
+                        before = before,
+                        after = captureEditorState(includeBitmap = true)
+                    )
+                }
+            }
+        },
         invalidate = ::invalidate
     )
     private val adjustmentModeActive: Boolean
@@ -830,6 +943,11 @@ class PhotoEditorView @JvmOverloads constructor(
     ) {
         clearBlurredBitmapCache()
         clearAnnotationHistory()
+        clearHistory()
+        cancelElementHistoryGesture()
+        transformHistoryBefore = null
+        transformHistoryChanged = false
+        adjustmentHistoryBefore = null
         this.bitmap = bitmap
         resetTransform()
         elements.clear()
@@ -856,6 +974,11 @@ class PhotoEditorView @JvmOverloads constructor(
     fun clearImage() {
         clearBlurredBitmapCache()
         clearAnnotationHistory()
+        clearHistory()
+        cancelElementHistoryGesture()
+        transformHistoryBefore = null
+        transformHistoryChanged = false
+        adjustmentHistoryBefore = null
         bitmap = null
         elements.clear()
         selectedElement = null
@@ -905,6 +1028,10 @@ class PhotoEditorView @JvmOverloads constructor(
         if (annotationElements.isEmpty()) {
             return false
         }
+
+        // Phase 11.6: applying annotations is a committed editor operation,
+        // so global Undo/Redo must restore both the bitmap and annotation layers.
+        val historyBefore = captureEditorState(includeBitmap = true)
 
         return try {
             val outputBitmap = Bitmap.createBitmap(
@@ -1041,6 +1168,13 @@ class PhotoEditorView @JvmOverloads constructor(
             annotationHistoryBeforeGesture = null
             onAnnotationHistoryChanged?.invoke()
 
+            // Record only after the annotation bitmap has been successfully
+            // committed and annotation elements have been removed.
+            recordEditorHistory(
+                before = historyBefore,
+                after = captureEditorState(includeBitmap = true)
+            )
+
             invalidate()
 
             Log.d(
@@ -1127,6 +1261,7 @@ class PhotoEditorView @JvmOverloads constructor(
                 }
             }
             bitmap = flippedBitmap
+            transformHistoryChanged = true
             // The bitmap dimensions did not change, so the existing zoom and
             // pan transform remains valid. Clear only transient gesture state.
             resetElementGestureState()
@@ -1272,6 +1407,13 @@ class PhotoEditorView @JvmOverloads constructor(
                     top == 0 &&
                     right == currentBitmap.width &&
                     bottom == currentBitmap.height
+
+        val historyBefore = if (!isFullImage) {
+            captureEditorState(includeBitmap = true)
+        } else {
+            null
+        }
+
         if (!isFullImage) {
             val croppedBitmap = Bitmap.createBitmap(
                 currentBitmap,
@@ -1323,6 +1465,13 @@ class PhotoEditorView @JvmOverloads constructor(
         resetTransform()
         notifySelectionChanged()
         onCropModeChanged?.invoke(false)
+        if (historyBefore != null) {
+            recordEditorHistory(
+                before = historyBefore,
+                after = captureEditorState(includeBitmap = true)
+            )
+        }
+
         Log.d( TAG, "Crop applied: ${cropWidth}x${cropHeight}, " + "origin=($left,$top), " + "elements=${elements.size}" )
         invalidate()
     }
@@ -1569,10 +1718,30 @@ class PhotoEditorView @JvmOverloads constructor(
     }
     /** Commits the current adjustment preview. */
     fun applyAdjustments() {
+        if (!adjustmentModeActive) {
+            Log.d(TAG, "Apply adjustments ignored: adjustment mode is not active")
+            return
+        }
+
+        // A neutral adjustment session does not change the committed image.
+        if (getAdjustmentState() == AdjustmentState()) {
+            adjustmentHistoryBefore = null
+            adjustmentController.apply()
+            return
+        }
+
+        if (adjustmentHistoryBefore == null) {
+            adjustmentHistoryBefore = captureEditorState(includeBitmap = true)
+        }
+
+        // AdjustmentController may wait for the newest background preview.
+        // The AdjustmentController mode callback records history only after
+        // that preview is actually committed.
         adjustmentController.apply()
     }
     /** Discards the temporary adjustment preview. */
     fun cancelAdjustments() {
+        adjustmentHistoryBefore = null
         adjustmentController.cancel()
     }
     /**
@@ -1598,6 +1767,11 @@ class PhotoEditorView @JvmOverloads constructor(
     fun isRotationMode(): Boolean = transformController.isActive
     /** Starts a temporary transform session and snapshots the complete editor state. */
     private fun beginTransformSession() {
+        if (!rotationModeActive) {
+            transformHistoryBefore = captureEditorState(includeBitmap = true)
+            transformHistoryChanged = false
+        }
+
         transformController.enter()
     }
     /** Commits the current transform preview. */
@@ -1606,7 +1780,19 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.d(TAG, "Apply rotation ignored: transform mode is not active")
             return
         }
+
         transformController.apply()
+
+        val before = transformHistoryBefore
+        if (before != null && transformHistoryChanged) {
+            recordEditorHistory(
+                before = before,
+                after = captureEditorState(includeBitmap = true)
+            )
+        }
+
+        transformHistoryBefore = null
+        transformHistoryChanged = false
         Log.d(TAG, "Transform applied")
     }
     /** Restores the exact editor state captured before transform preview began. */
@@ -1629,6 +1815,8 @@ class PhotoEditorView @JvmOverloads constructor(
         translationY = snapshot.translationY
         notifySelectionChanged()
         invalidate()
+        transformHistoryBefore = null
+        transformHistoryChanged = false
         Log.d( TAG, "Transform cancelled. Original image restored: " + "${snapshot.bitmap.width}x${snapshot.bitmap.height}" )
     }
     private fun exitRotationModeWithoutRestore() {
@@ -1699,6 +1887,7 @@ class PhotoEditorView @JvmOverloads constructor(
                 }
             }
             bitmap = rotatedBitmap
+            transformHistoryChanged = true
             // The image dimensions changed, so the previous zoom/pan transform
             // is no longer guaranteed to be appropriate for the new aspect
             // ratio. Fit the rotated image back into the editor.
@@ -1781,6 +1970,7 @@ class PhotoEditorView @JvmOverloads constructor(
                 }
             }
             bitmap = rotatedBitmap
+            transformHistoryChanged = true
             // The image dimensions changed, so fit the rotated image back
             // into the editor using the existing transform logic.
             resetTransform()
@@ -1859,6 +2049,7 @@ class PhotoEditorView @JvmOverloads constructor(
                 }
             }
             bitmap = flippedBitmap
+            transformHistoryChanged = true
             resetElementGestureState()
             Log.d(
                 TAG,
@@ -2161,6 +2352,8 @@ class PhotoEditorView @JvmOverloads constructor(
     fun addElement(
         element: EditorElement
     ) {
+        val historyBefore = captureEditorState()
+
         /*
          * Deselect previous element.
          */
@@ -2176,8 +2369,211 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d( TAG, "Element added. Total elements: " + elements.size )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     fun getElements(): List<EditorElement> = elements
+
+    // =========================================================================
+    // GLOBAL EDITOR HISTORY - PHASE 11.1
+    // =========================================================================
+
+    /**
+     * Captures the current editor state for the global Undo / Redo system.
+     *
+     * Element snapshots are independent copies. The current bitmap is optional
+     * for Phase 11.1 because image-operation history is integrated separately
+     * in Phase 11.3.
+     *
+     * Viewport state (zoom/pan) is intentionally not part of editor history.
+     */
+    private fun captureEditorState(
+        includeBitmap: Boolean = false
+    ): EditorStateSnapshot {
+        val elementCopies = elements.map { element ->
+            element.duplicate().also { copy ->
+                copy.isSelected = false
+                copy.isVisible = element.isVisible
+                copy.isLocked = element.isLocked
+            }
+        }
+
+        return EditorStateSnapshot(
+            elements = elementCopies,
+            selectedElementIndex = elements.indexOf(selectedElement),
+            bitmap = if (includeBitmap) {
+                bitmap?.let { currentBitmap ->
+                    currentBitmap.copy(
+                        currentBitmap.config ?: Bitmap.Config.ARGB_8888,
+                        true
+                    )
+                }
+            } else {
+                null
+            }
+        )
+    }
+
+    /**
+     * Restores a previously captured global editor state.
+     *
+     * Bitmap restoration is performed only when the snapshot contains a bitmap.
+     * This allows Phase 11.1 element history to be introduced without changing
+     * the existing image-operation pipeline.
+     */
+    private fun restoreEditorState(
+        state: EditorStateSnapshot
+    ) {
+        if (state.bitmap != null) {
+            bitmap = state.bitmap
+            clearBlurredBitmapCache()
+        }
+
+        selectedElement?.isSelected = false
+        elements.clear()
+        elements.addAll(
+            state.elements.map { element ->
+                element.duplicate().also { copy ->
+                    copy.isSelected = false
+                    copy.isVisible = element.isVisible
+                    copy.isLocked = element.isLocked
+                }
+            }
+        )
+
+        selectedElement = elements.getOrNull(
+            state.selectedElementIndex
+        )
+
+        elements.forEach { element ->
+            element.isSelected = element === selectedElement
+        }
+
+        transformMode = TransformMode.NONE
+        isMovingElement = false
+        isDragging = false
+
+        notifySelectionChanged()
+        invalidate()
+    }
+
+    /**
+     * Records one completed editor operation.
+     *
+     * The current Phase 11.1 foundation stores the state that existed before
+     * the operation. Redo receives the current state at the moment Redo/Undo
+     * is requested. Operation-specific integration is added in later phases.
+     */
+    private fun recordEditorHistory(
+        before: EditorStateSnapshot,
+        after: EditorStateSnapshot
+    ) {
+        editorHistoryController.record(
+            before = before,
+            after = after
+        )
+
+        onHistoryChanged?.invoke()
+    }
+
+    /**
+     * Undoes the most recent global editor operation.
+     *
+     * Annotation Undo remains separate and continues to use the existing
+     * AnnotationHistoryController until Phase 11.6 integrates the two systems.
+     */
+    fun undo(): Boolean {
+        if (freehandModeActive || eraserModeActive) {
+            finishActiveFreehandPath(commit = false)
+            cancelAnnotationHistoryGesture()
+            freehandModeActive = false
+            eraserModeActive = false
+            activeEraserPoint = null
+            lastEraserImagePoint = null
+            resetElementGestureState()
+        }
+
+        val state = editorHistoryController.undo(
+            currentState = captureEditorState()
+        ) ?: return false
+
+        restoreEditorState(state)
+
+        onHistoryChanged?.invoke()
+
+        Log.d(TAG, "Global editor undo performed")
+        return true
+    }
+
+    /**
+     * Redoes the most recently undone global editor operation.
+     */
+    fun redo(): Boolean {
+        if (freehandModeActive || eraserModeActive) {
+            finishActiveFreehandPath(commit = false)
+            cancelAnnotationHistoryGesture()
+            freehandModeActive = false
+            eraserModeActive = false
+            activeEraserPoint = null
+            lastEraserImagePoint = null
+            resetElementGestureState()
+        }
+
+        val state = editorHistoryController.redo(
+            currentState = captureEditorState()
+        ) ?: return false
+
+        restoreEditorState(state)
+
+        onHistoryChanged?.invoke()
+
+        Log.d(TAG, "Global editor redo performed")
+        return true
+    }
+
+    /**
+     * Returns true when a global editor Undo operation is available.
+     */
+    fun canUndo(): Boolean {
+        return editorHistoryController.canUndo()
+    }
+
+    /**
+     * Returns true when a global editor Redo operation is available.
+     */
+    fun canRedo(): Boolean {
+        return editorHistoryController.canRedo()
+    }
+
+    /**
+     * Returns the number of available global Undo operations.
+     */
+    fun undoCount(): Int {
+        return editorHistoryController.undoCount()
+    }
+
+    /**
+     * Returns the number of available global Redo operations.
+     */
+    fun redoCount(): Int {
+        return editorHistoryController.redoCount()
+    }
+
+    /**
+     * Clears global editor history without changing the current editor state.
+     *
+     * This is used when starting a new image/editor session and will also be
+     * used by later export/save history-safety integration.
+     */
+    fun clearHistory() {
+        editorHistoryController.clear()
+        onHistoryChanged?.invoke()
+        Log.d(TAG, "Global editor history cleared")
+    }
+
 
     /**
      * Returns the number of editable layers currently in the editor.
@@ -2249,6 +2645,7 @@ class PhotoEditorView @JvmOverloads constructor(
         }
 
         val element = selectedElement ?: return false
+        val historyBefore = captureEditorState()
         val currentIndex = elements.indexOf(element)
         if (currentIndex < 0) {
             Log.w(TAG, "Duplicate ignored: selected element not found")
@@ -2287,6 +2684,8 @@ class PhotoEditorView @JvmOverloads constructor(
         val element = selectedElement ?: return false
         if (!elements.contains(element)) return false
 
+        val historyBefore = captureEditorState()
+
         element.isVisible = !element.isVisible
         element.isSelected = element.isVisible
 
@@ -2312,6 +2711,8 @@ class PhotoEditorView @JvmOverloads constructor(
         val element = selectedElement ?: return false
         if (!elements.contains(element)) return false
 
+        val historyBefore = captureEditorState()
+
         element.isLocked = !element.isLocked
         transformMode = TransformMode.NONE
         isMovingElement = false
@@ -2319,6 +2720,12 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d(TAG, "Layer lock changed: locked=${element.isLocked}")
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
+
         return true
     }
 
@@ -2334,6 +2741,8 @@ class PhotoEditorView @JvmOverloads constructor(
         val element = selectedElement ?: return false
         if (!elements.contains(element)) return false
 
+        val historyBefore = captureEditorState()
+
         element.isLocked = locked
         transformMode = TransformMode.NONE
         isMovingElement = false
@@ -2341,10 +2750,17 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d(TAG, "Layer lock set: locked=$locked")
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
+
         return true
     }
 
     fun bringSelectedElementToFront(): Boolean {
+        val historyBefore = captureEditorState()
         val element = selectedElement ?: return false
         val currentIndex = elements.indexOf(element)
         if (currentIndex < 0 || currentIndex == elements.lastIndex) {
@@ -2354,6 +2770,12 @@ class PhotoEditorView @JvmOverloads constructor(
         elements.removeAt(currentIndex)
         elements.add(element)
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
+
         return true
     }
 
@@ -2361,6 +2783,7 @@ class PhotoEditorView @JvmOverloads constructor(
      * Moves the selected element to the bottom-most layer.
      */
     fun sendSelectedElementToBack(): Boolean {
+        val historyBefore = captureEditorState()
         val element = selectedElement ?: return false
         val currentIndex = elements.indexOf(element)
         if (currentIndex <= 0) {
@@ -2370,6 +2793,12 @@ class PhotoEditorView @JvmOverloads constructor(
         elements.removeAt(currentIndex)
         elements.add(0, element)
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
+
         return true
     }
 
@@ -2377,6 +2806,7 @@ class PhotoEditorView @JvmOverloads constructor(
      * Moves the selected element up by one layer.
      */
     fun bringSelectedElementForward(): Boolean {
+        val historyBefore = captureEditorState()
         val element = selectedElement ?: return false
         val currentIndex = elements.indexOf(element)
         if (currentIndex < 0 || currentIndex == elements.lastIndex) {
@@ -2387,6 +2817,12 @@ class PhotoEditorView @JvmOverloads constructor(
             elements[currentIndex + 1] = element
         }
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
+
         return true
     }
 
@@ -2394,6 +2830,7 @@ class PhotoEditorView @JvmOverloads constructor(
      * Moves the selected element down by one layer.
      */
     fun sendSelectedElementBackward(): Boolean {
+        val historyBefore = captureEditorState()
         val element = selectedElement ?: return false
         val currentIndex = elements.indexOf(element)
         if (currentIndex <= 0) {
@@ -2404,11 +2841,18 @@ class PhotoEditorView @JvmOverloads constructor(
             elements[currentIndex - 1] = element
         }
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
+
         return true
     }
 
     fun clearElements() {
         clearAnnotationHistory()
+        clearHistory()
         elements.forEach {
             it.isSelected = false
         }
@@ -2439,6 +2883,8 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.w( TAG, "Cannot update text. Element not found." )
             return
         }
+        val historyBefore = captureEditorState()
+
         textElement.updateText(
             newText
         )
@@ -2446,6 +2892,11 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d( TAG, "Text element updated: $newText" )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     /**
      * Updates the color of an existing TextElement.
@@ -2462,6 +2913,8 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.w( TAG, "Cannot update text color. " + "Element not found." )
             return
         }
+        val historyBefore = captureEditorState()
+
         textElement.updateColor(
             newColor
         )
@@ -2469,6 +2922,11 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d( TAG, "Text color updated: $newColor" )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     /**
      * Updates the color of a selected range inside a TextElement.
@@ -2483,6 +2941,8 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.w( TAG, "Cannot update text color range. Element not found." )
             return
         }
+        val historyBefore = captureEditorState()
+
         textElement.updateColorRange(
             start,
             end,
@@ -2492,6 +2952,11 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d( TAG, "Text color range updated: " + "start=$start end=$end color=$newColor" )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     /**
      * Restores previously saved text color ranges.
@@ -2504,11 +2969,18 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.w( TAG, "Cannot restore text color ranges. Element not found." )
             return
         }
+        val historyBefore = captureEditorState()
+
         textElement.setColorRanges(ranges)
         selectUpdatedTextElement(textElement)
         Log.d( TAG, "Text color ranges restored: ${ranges.size} ranges" )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     /**
      * Updates the size of an existing TextElement.
@@ -2525,6 +2997,8 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.w( TAG, "Cannot update text size. " + "Element not found." )
             return
         }
+        val historyBefore = captureEditorState()
+
         textElement.updateTextSize(
             newSize
         )
@@ -2532,6 +3006,11 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d( TAG, "Text size updated: " + textElement.textSize )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     /**
      * Updates the Bold state.
@@ -2548,6 +3027,8 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.w( TAG, "Cannot update text bold. " + "Element not found." )
             return
         }
+        val historyBefore = captureEditorState()
+
         textElement.updateBold(
             enabled
         )
@@ -2555,6 +3036,11 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d( TAG, "Text bold updated: " + textElement.bold )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     /**
      * Updates the Italic state.
@@ -2571,6 +3057,8 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.w( TAG, "Cannot update text italic. " + "Element not found." )
             return
         }
+        val historyBefore = captureEditorState()
+
         textElement.updateItalic(
             enabled
         )
@@ -2578,6 +3066,11 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d( TAG, "Text italic updated: " + textElement.italic )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     /**
      * Updates text alignment.
@@ -2594,6 +3087,8 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.w( TAG, "Cannot update text alignment. " + "Element not found." )
             return
         }
+        val historyBefore = captureEditorState()
+
         textElement.updateAlignment(
             alignment
         )
@@ -2601,6 +3096,11 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d( TAG, "Text alignment updated: " + textElement.alignment )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     /**
      * Updates the typeface of an existing TextElement.
@@ -2613,11 +3113,18 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.w(TAG, "Cannot update font. Element not found.")
             return
         }
+        val historyBefore = captureEditorState()
+
         textElement.updateFont(font)
         selectUpdatedTextElement(textElement)
         Log.d( TAG, "Text font updated: ${textElement.getFontDisplayName()}" )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     /**
      * Updates the background enabled state
@@ -2635,6 +3142,8 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.w( TAG, "Cannot update text background. " + "Element not found." )
             return
         }
+        val historyBefore = captureEditorState()
+
         textElement.updateBackground(
             enabled
         )
@@ -2642,6 +3151,11 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d( TAG, "Text background updated: " + enabled )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     /**
      * Updates the background color
@@ -2659,6 +3173,8 @@ class PhotoEditorView @JvmOverloads constructor(
             Log.w( TAG, "Cannot update text background color. " + "Element not found." )
             return
         }
+        val historyBefore = captureEditorState()
+
         textElement.updateBackgroundColor(
             newColor
         )
@@ -2666,6 +3182,11 @@ class PhotoEditorView @JvmOverloads constructor(
         Log.d( TAG, "Text background color updated: " + newColor )
         notifySelectionChanged()
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     /** Marks an existing text element as the active selection after an update. */
     private fun selectUpdatedTextElement(textElement: TextElement) {
@@ -2926,12 +3447,19 @@ class PhotoEditorView @JvmOverloads constructor(
         val shape = selectedElement as? ShapeElement ?: return
         if (shape.isLocked) {
             Log.d(TAG, "Shape rotation ignored: element is locked")
+            beginElementHistoryGesture()
             transformMode = TransformMode.NONE
             return
         }
+        beginElementHistoryGesture()
         transformMode = TransformMode.ROTATE
         initialRotation = shape.rotation
-        val center = imageToScreen(shape.position.x, shape.position.y) ?: return
+        val center = imageToScreen(shape.position.x, shape.position.y)
+            ?: run {
+                cancelElementHistoryGesture()
+                transformMode = TransformMode.NONE
+                return
+            }
         initialRotationAngle = Math.toDegrees(
             atan2((touchY - center.y).toDouble(), (touchX - center.x).toDouble())
         ).toFloat()
@@ -2950,18 +3478,26 @@ class PhotoEditorView @JvmOverloads constructor(
         while (newRotation < 0f) newRotation += 360f
         while (newRotation >= 360f) newRotation -= 360f
         shape.rotation = newRotation
+        markElementHistoryChanged()
         invalidate()
     }
     private fun startShapeResize(touchX: Float, touchY: Float) {
         val shape = selectedElement as? ShapeElement ?: return
         if (shape.isLocked) {
             Log.d(TAG, "Shape resize ignored: element is locked")
+            beginElementHistoryGesture()
             transformMode = TransformMode.NONE
             return
         }
+        beginElementHistoryGesture()
         transformMode = TransformMode.RESIZE
         initialElementScale = shape.scale
-        val center = imageToScreen(shape.position.x, shape.position.y) ?: return
+        val center = imageToScreen(shape.position.x, shape.position.y)
+            ?: run {
+                cancelElementHistoryGesture()
+                transformMode = TransformMode.NONE
+                return
+            }
         initialResizeDistance = distance(center.x, center.y, touchX, touchY).coerceAtLeast(1f)
         Log.d(TAG, "Shape resize started: $initialElementScale")
     }
@@ -2972,6 +3508,7 @@ class PhotoEditorView @JvmOverloads constructor(
         if (initialResizeDistance <= 0f) return
         shape.scale = (initialElementScale * currentDistance / initialResizeDistance)
             .coerceIn(MIN_ELEMENT_SCALE, MAX_ELEMENT_SCALE)
+        markElementHistoryChanged()
         invalidate()
     }
     private fun drawShapeSelectionHandles(canvas: Canvas, shape: ShapeElement) {
@@ -3409,9 +3946,11 @@ class PhotoEditorView @JvmOverloads constructor(
                 ?: return
         if (element.isLocked) {
             Log.d(TAG, "Text rotation ignored: element is locked")
+            beginElementHistoryGesture()
             transformMode = TransformMode.NONE
             return
         }
+        beginElementHistoryGesture()
         transformMode =
             TransformMode.ROTATE
         initialRotation =
@@ -3421,7 +3960,12 @@ class PhotoEditorView @JvmOverloads constructor(
          * in screen coordinates.
          */
         val center =
-            imageToScreen(element.position.x, element.position.y) ?: return
+            imageToScreen(element.position.x, element.position.y)
+                ?: run {
+                    cancelElementHistoryGesture()
+                    transformMode = TransformMode.NONE
+                    return
+                }
         initialRotationAngle =
             Math.toDegrees(
                 atan2(
@@ -3472,6 +4016,7 @@ class PhotoEditorView @JvmOverloads constructor(
         }
         element.rotation =
             newRotation
+        markElementHistoryChanged()
         Log.d( TAG, "Element rotation=$newRotation" )
         invalidate()
     }
@@ -3484,15 +4029,22 @@ class PhotoEditorView @JvmOverloads constructor(
                 ?: return
         if (element.isLocked) {
             Log.d(TAG, "Text resize ignored: element is locked")
+            beginElementHistoryGesture()
             transformMode = TransformMode.NONE
             return
         }
+        beginElementHistoryGesture()
         transformMode =
             TransformMode.RESIZE
         initialElementScale =
             element.scale
         val center =
-            imageToScreen(element.position.x, element.position.y) ?: return
+            imageToScreen(element.position.x, element.position.y)
+                ?: run {
+                    cancelElementHistoryGesture()
+                    transformMode = TransformMode.NONE
+                    return
+                }
         initialResizeDistance =
             distance(
                 center.x,
@@ -3538,6 +4090,7 @@ class PhotoEditorView @JvmOverloads constructor(
                 )
         element.scale =
             newScale
+        markElementHistoryChanged()
         Log.d( TAG, "Element scale=$newScale" )
         invalidate()
     }
@@ -3555,6 +4108,8 @@ class PhotoEditorView @JvmOverloads constructor(
             return
         }
         Log.d( TAG, "Deleting selected element" )
+
+        val historyBefore = captureEditorState()
 
         val annotationHistoryBeforeDelete =
             if (element is AnnotationElement) {
@@ -3581,6 +4136,11 @@ class PhotoEditorView @JvmOverloads constructor(
         }
 
         invalidate()
+
+        recordEditorHistory(
+            before = historyBefore,
+            after = captureEditorState()
+        )
     }
     fun addTestText() {
         if (
@@ -3787,17 +4347,18 @@ class PhotoEditorView @JvmOverloads constructor(
      * Eraser gestures are converted to image coordinates and sampled between
      * touch events so fast finger movement cannot jump over an annotation.
      */
-    private fun eraseAtScreenPoint(screenX: Float, screenY: Float) {
-        val imagePoint = screenToImage(screenX, screenY) ?: return
+    private fun eraseAtScreenPoint(screenX: Float, screenY: Float): Boolean {
+        val imagePoint = screenToImage(screenX, screenY) ?: return false
 
+        var changed = false
         activeEraserPoint = PointF(screenX, screenY)
 
         val previous = lastEraserImagePoint
         if (previous == null) {
-            eraseAnnotationsAt(
+            changed = eraseAnnotationsAt(
                 imageX = imagePoint.x,
                 imageY = imagePoint.y
-            )
+            ) || changed
         } else {
             val dx = imagePoint.x - previous.x
             val dy = imagePoint.y - previous.y
@@ -3811,10 +4372,10 @@ class PhotoEditorView @JvmOverloads constructor(
                 val sampleX = previous.x + dx * fraction
                 val sampleY = previous.y + dy * fraction
 
-                eraseAnnotationsAt(
+                changed = eraseAnnotationsAt(
                     imageX = sampleX,
                     imageY = sampleY
-                )
+                ) || changed
             }
         }
 
@@ -3824,6 +4385,7 @@ class PhotoEditorView @JvmOverloads constructor(
         )
 
         invalidate()
+        return changed
     }
 
     /** Draws all committed blur annotations over a blurred copy of the image. */
@@ -4318,13 +4880,17 @@ class PhotoEditorView @JvmOverloads constructor(
                 MotionEvent.ACTION_DOWN -> {
                     resetElementGestureState()
                     beginAnnotationHistoryGesture()
+                    beginElementHistoryGesture()
                     activeEraserPoint = PointF(event.x, event.y)
                     lastEraserImagePoint = null
 
-                    eraseAtScreenPoint(
-                        event.x,
-                        event.y
-                    )
+                    if (eraseAtScreenPoint(
+                            event.x,
+                            event.y
+                        )
+                    ) {
+                        markElementHistoryChanged()
+                    }
 
                     invalidate()
                     return true
@@ -4332,16 +4898,20 @@ class PhotoEditorView @JvmOverloads constructor(
 
                 MotionEvent.ACTION_MOVE -> {
                     if (event.pointerCount == 1) {
-                        eraseAtScreenPoint(
-                            event.x,
-                            event.y
-                        )
+                        if (eraseAtScreenPoint(
+                                event.x,
+                                event.y
+                            )
+                        ) {
+                            markElementHistoryChanged()
+                        }
                     }
                     return true
                 }
 
                 MotionEvent.ACTION_UP -> {
                     finishAnnotationHistoryGesture()
+                    finishElementHistoryGesture()
                     activeEraserPoint = null
                     lastEraserImagePoint = null
                     isDragging = false
@@ -4353,6 +4923,7 @@ class PhotoEditorView @JvmOverloads constructor(
 
                 MotionEvent.ACTION_CANCEL -> {
                     cancelAnnotationHistoryGesture()
+                    cancelElementHistoryGesture()
                     activeEraserPoint = null
                     lastEraserImagePoint = null
                     isDragging = false
@@ -4599,6 +5170,11 @@ class PhotoEditorView @JvmOverloads constructor(
 
                     if (touchedElement != null) {
                         selectElement(touchedElement)
+
+                        if (!touchedElement.isLocked) {
+                            beginElementHistoryGesture()
+                        }
+
                         isMovingElement = true
                         Log.d(TAG, "Element touched")
                     } else {
@@ -4683,7 +5259,10 @@ class PhotoEditorView @JvmOverloads constructor(
                             val dx = currentPoint.x - previousPoint.x
                             val dy = currentPoint.y - previousPoint.y
 
-                            selectedElement?.moveBy(dx, dy)
+                            if (dx != 0f || dy != 0f) {
+                                selectedElement?.moveBy(dx, dy)
+                                markElementHistoryChanged()
+                            }
                             Log.d(TAG, "Moving element dx=$dx dy=$dy")
                         }
                     } else {
@@ -4706,15 +5285,22 @@ class PhotoEditorView @JvmOverloads constructor(
                 return true
             }
 
-            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_UP -> {
+                finishElementHistoryGesture()
+                isDragging = false
+                isMovingElement = false
+                transformMode = TransformMode.NONE
+                return true
+            }
+
             MotionEvent.ACTION_CANCEL -> {
+                cancelElementHistoryGesture()
                 isDragging = false
                 isMovingElement = false
                 transformMode = TransformMode.NONE
                 return true
             }
         }
-
         return true
     }
 }
