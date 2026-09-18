@@ -787,79 +787,169 @@ Phase 10 introduces layer management for Text, Shape, and Annotation elements wh
 
 # Phase 11 — Undo / Redo
 
-Phase 11 will introduce a centralized editor history system so users can safely undo and redo editor operations across the existing editing features.
+Phase 11 introduces a centralized editor history system so users can safely undo and redo committed editor operations across the existing editing features.
+
+The implementation was completed incrementally while preserving the existing Text, Shape, Annotation, Crop, Transform, Filter, Adjustment, and Layer functionality.
 
 ## 11.1 — History Foundation
 
-* [ ] Editor history model
-* [ ] History entry representation
-* [ ] Centralized undo / redo state
-* [ ] History stack management
-* [ ] Maximum history size protection
-* [ ] Safe history reset
+* [x] `EditorStateSnapshot`
+* [x] `EditorHistoryController`
+* [x] Centralized undo / redo state
+* [x] Undo stack management
+* [x] Redo stack management
+* [x] Maximum history size protection
+* [x] Safe history reset
+* [x] Editor state snapshot / restore
+* [x] Preserve element visibility and lock state
+* [x] Preserve selected element state
+* [x] Keep viewport zoom / pan outside editor history
 
-## 11.2 — Undo
+## 11.2 — Element Operations
 
-* [ ] Undo last editor operation
-* [ ] Restore previous editor state
-* [ ] Safe undo when history is empty
-* [ ] Update Undo button state
-* [ ] Preserve current selection where possible
+* [x] Undo text creation / deletion
+* [x] Undo text movement
+* [x] Undo text resize / rotation
+* [x] Undo text styling changes
+* [x] Undo shape creation / deletion
+* [x] Undo shape movement
+* [x] Undo shape resize / rotation
+* [x] Undo annotation creation / deletion
+* [x] Undo annotation movement / transformation
+* [x] Undo duplicate / delete
+* [x] Undo hide / show
+* [x] Undo lock / unlock
+* [x] Undo layer ordering
+* [x] Preserve selection, visibility, and lock state
 
-## 11.3 — Redo
+## 11.3 — Image Editing History
 
-* [ ] Redo previously undone operation
-* [ ] Safe redo when history is empty
-* [ ] Clear redo history after a new edit
-* [ ] Update Redo button state
+* [x] Undo crop
+* [x] Undo image rotation
+* [x] Undo horizontal flip
+* [x] Undo vertical flip
+* [x] Undo filters
+* [x] Undo brightness
+* [x] Undo contrast
+* [x] Undo saturation
+* [x] Undo exposure
+* [x] Undo temperature
+* [x] Undo highlights
+* [x] Undo shadows
+* [x] Undo combined adjustments
+* [x] Record committed operations only
+* [x] Do not record temporary previews
+* [x] Do not record Cancel operations
 
-## 11.4 — Element History
+## 11.4 — Redo
 
-* [ ] Text creation / deletion history
-* [ ] Text movement history
-* [ ] Text resize / rotation history
-* [ ] Shape creation / deletion history
-* [ ] Shape movement history
-* [ ] Shape resize / rotation history
-* [ ] Annotation creation / deletion history
-* [ ] Annotation movement / transformation history
-* [ ] Duplicate / delete history
-* [ ] Hide / show history
-* [ ] Lock / unlock history
-* [ ] Layer ordering history
+* [x] Redo element operations
+* [x] Redo text operations
+* [x] Redo shape operations
+* [x] Redo annotation operations
+* [x] Redo duplicate / delete
+* [x] Redo layer operations
+* [x] Redo crop
+* [x] Redo image transforms
+* [x] Redo flips
+* [x] Redo filters
+* [x] Redo adjustments
+* [x] Clear redo history after a new edit
+* [x] Support multiple Undo / Redo operations
+* [x] Safe empty Undo / Redo behavior
 
-## 11.5 — Image Editing History
+## 11.5 — Gesture History
 
-* [ ] Crop history
-* [ ] Transform history
-* [ ] Filter history
-* [ ] Adjustment history
-* [ ] Apply / Cancel state safety
-* [ ] Preserve editor elements across image history operations
+* [x] One continuous move gesture = one history operation
+* [x] One continuous resize gesture = one history operation
+* [x] One continuous rotation gesture = one history operation
+* [x] Text gesture history
+* [x] Shape gesture history
+* [x] No history entry for a no-op gesture
+* [x] Cancelled gestures do not create history entries
+* [x] Locked elements remain protected
+* [x] Preserve existing annotation gesture history
 
 ## 11.6 — Annotation History Integration
 
-* [ ] Integrate existing annotation Undo / Redo with editor history
-* [ ] Preserve gesture-level annotation history
-* [ ] Preserve Blur history
-* [ ] Preserve Pixelate history
-* [ ] Prevent duplicate history entries
+* [x] Preserve existing annotation-specific Undo / Redo
+* [x] Add committed annotation Apply operations to global editor history
+* [x] Preserve gesture-level annotation history
+* [x] Preserve Eraser history
+* [x] Preserve Blur history
+* [x] Preserve Pixelate history
+* [x] Prevent unnecessary duplicate global entries
+* [x] Preserve existing annotation history behavior
+* [x] Preserve Pixelate rendering behavior
 
 ## 11.7 — History UX
 
-* [ ] Undo button
-* [ ] Redo button
-* [ ] Disabled state when unavailable
-* [ ] Clear history on new image
-* [ ] Safe history handling during mode transitions
-* [ ] Prevent conflicting operations
-* [ ] History interaction regression testing
+* [x] Global Undo button
+* [x] Global Redo button
+* [x] Disable Undo when unavailable
+* [x] Disable Redo when unavailable
+* [x] Immediate Undo / Redo button state updates
+* [x] Global history callback from `PhotoEditorView`
+* [x] Keep annotation-specific Undo / Redo controls separate
+* [x] Preserve existing editor toolbar
+* [x] Preserve existing annotation toolbar
+
+## 11.8 — History Safety
+
+* [x] Clear global history when a new image is loaded
+* [x] Clear global history when the editor image is cleared
+* [x] Do not record Cancel operations
+* [x] Do not record toolbar open / close
+* [x] Do not record layer-panel selection
+* [x] Do not record viewport pan / zoom
+* [x] Do not record temporary crop previews
+* [x] Do not record temporary transform previews
+* [x] Do not record temporary adjustment previews
+* [x] Protect mode transitions
+* [x] Prevent Undo / Redo from recursively creating history entries
+* [x] Preserve existing annotation-specific history behavior
+* [x] Maintain safe gesture cleanup
+
+## 11.9 — Final Validation
+
+* [x] Text creation → Undo → Redo
+* [x] Text movement → Undo → Redo
+* [x] Text resize → Undo → Redo
+* [x] Text rotation → Undo → Redo
+* [x] Shape creation → Undo → Redo
+* [x] Shape movement → Undo → Redo
+* [x] Shape resize → Undo → Redo
+* [x] Shape rotation → Undo → Redo
+* [x] Duplicate / delete → Undo → Redo
+* [x] Hide / show → Undo → Redo
+* [x] Lock / unlock → Undo → Redo
+* [x] Layer ordering → Undo → Redo
+* [x] Freehand / Pen / Highlighter → Undo → Redo
+* [x] Blur → Undo → Redo
+* [x] Pixelate → Undo → Redo
+* [x] Eraser gesture → single Undo
+* [x] Crop → Undo → Redo
+* [x] Rotate → Undo → Redo
+* [x] Flip Horizontal → Undo → Redo
+* [x] Flip Vertical → Undo → Redo
+* [x] Filter → Undo → Redo
+* [x] Adjustments → Undo → Redo
+* [x] Combined editing sequences
+* [x] Multiple Undo operations
+* [x] Multiple Redo operations
+* [x] New edit after Undo clears Redo
+* [x] No-op gesture does not create history
+* [x] Cancelled gesture does not create history
+* [x] Existing Pixelate behavior preserved
+* [x] Existing Blur behavior preserved
+* [x] Existing layer behavior preserved
+* [x] Existing Text / Shape / Annotation behavior preserved
 
 ### Phase 11 Status
 
-**⏳ IN PROGRESS**
+**✅ COMPLETED**
 
-> Phase 11 should be implemented incrementally. Existing Text, Shape, Annotation, Crop, Transform, Filter, Adjustment, and Layer functionality must remain stable throughout the history implementation.
+> Phase 11 is complete. The editor now has centralized global Undo / Redo history covering element operations, gestures, image operations, annotations, layers, filters, and adjustments while preserving the existing annotation-specific history system and editor functionality.
 
 ---
 
@@ -944,7 +1034,7 @@ Phase 11 will introduce a centralized editor history system so users can safely 
 | Phase 8 — Shapes                  | ✅ Completed    |
 | Phase 9 — Annotation              | ✅ Completed    |
 | Phase 10 — Layers                 | ✅ Completed    |
-| Phase 11 — Undo / Redo            | ⏳ In Progress  |
+| Phase 11 — Undo / Redo            | ✅ Completed    |
 | Phase 12 — Save / Export          | ⏳ Planned      |
 | Phase 13 — Share                  | ⏳ Planned      |
 | Phase 14 — UI / UX                | ⏳ Planned      |
@@ -1066,6 +1156,29 @@ The current editor supports:
 * Contextual annotation toolbar
 * Annotation state safety
 
+## Undo / Redo
+
+* Centralized editor history
+* Global Undo / Redo
+* Text operation history
+* Shape operation history
+* Annotation operation history
+* Gesture-level history
+* Crop history
+* Transform history
+* Flip history
+* Filter history
+* Adjustment history
+* Layer operation history
+* Duplicate / delete history
+* Hide / show history
+* Lock / unlock history
+* Redo stack management
+* Safe history reset
+* Maximum history size protection
+* Empty-history protection
+* New-edit Redo clearing
+
 # 🏗️ Architecture
 
 The project follows clean and maintainable architecture principles using:
@@ -1150,24 +1263,34 @@ Testing includes:
 
 # 📌 Current Development Checkpoint
 
-**Phase 10 — Layers: ✅ COMPLETED
+**Phase 11 — Undo / Redo: ✅ COMPLETED**
 
-Phase 10 is complete, including:
+Phase 11 is complete, including:
 
-* Layer management
-* Layer ordering
-* Bring to front / send to back
-* Layer selection
-* Duplicate / delete
-* Hide / show
-* Lock / unlock
-* Locked element interaction safety
-* Improved layer panel UX
-* Visibility and lock indicators
-* Clear selected-layer indication
-* Improved layer names
+* Centralized editor history
+* Undo / Redo stacks
+* Maximum history size protection
+* Text history
+* Shape history
+* Annotation history integration
+* Gesture-level history
+* Crop history
+* Transform history
+* Flip history
+* Filter history
+* Adjustment history
+* Layer operation history
+* Duplicate / delete history
+* Hide / show history
+* Lock / unlock history
+* Global Undo / Redo controls
+* Safe history reset
+* Empty-history protection
+* Redo clearing after new edits
+* Preservation of existing annotation-specific history
+* Preservation of existing Pixelate / Blur behavior
 
-Previously completed image, text, crop, transform, filter, adjustment, shape, and annotation functionality remains preserved.
+Previously completed image, text, crop, transform, filter, adjustment, shape, annotation, and layer functionality remains preserved.
 
 The editor architecture has also completed its incremental refactor:
 
@@ -1180,9 +1303,9 @@ The editor architecture has also completed its incremental refactor:
 
 The next development task is:
 
-> **Phase 11 — Undo / Redo**
+> **Phase 12 — Save / Export**
 
-Phase 11 will introduce centralized editor history and Undo / Redo while preserving all existing editor functionality.
+Phase 12 will add persistent image saving and export capabilities while preserving the completed editing and history systems.
 
 # 📦 Git Checkpoints
 
@@ -1246,12 +1369,14 @@ Phase 10.5 - Layer Visibility
 Phase 10.6 - Layer Lock / Unlock
 Phase 10.7 - Layer Panel UX
 Phase 11.1 - History Foundation
-Phase 11.2 - Undo
-Phase 11.3 - Redo
-Phase 11.4 - Element History
-Phase 11.5 - Image Editing History
+Phase 11.2 - Element Operations
+Phase 11.3 - Image Editing History
+Phase 11.4 - Redo
+Phase 11.5 - Gesture History
 Phase 11.6 - Annotation History Integration
 Phase 11.7 - History UX
+Phase 11.8 - History Safety
+Phase 11.9 - Final Validation
 ```
 
 This makes it easier to track development progress and safely return to a previous stable implementation.
@@ -1260,11 +1385,11 @@ This makes it easier to track development progress and safely return to a previo
 
 # 📈 Project Status
 
-**Current Phase:** Phase 11 — Undo / Redo: ⏳ IN PROGRESS
+**Current Phase:** Phase 12 — Save / Export: ⏳ PLANNED
 
-**Current Task:** Phase 11.1 — History Foundation
+**Current Task:** Phase 12 — Save / Export
 
-**Completed Phases:** 1–10
+**Completed Phases:** 1–11
 
 **Crop Status:** ✅ Completed
 
@@ -1280,7 +1405,7 @@ This makes it easier to track development progress and safely return to a previo
 
 **PhotoEditorView Optimization:** ✅ Completed through Optimization 6
 
-**Next Milestone:** Phase 11 — Undo / Redo
+**Next Milestone:** Phase 12 — Save / Export
 
 ## 🎯 Development Philosophy
 
